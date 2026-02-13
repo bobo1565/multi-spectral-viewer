@@ -1,0 +1,74 @@
+.vegetation-panel {
+    height: 100%;
+    overflow-y: auto;
+}
+
+.vegetation-panel .ant-card-body {
+    padding: 12px;
+}
+
+.index-selector {
+    margin-bottom: 8px;
+}
+
+.index-info {
+    margin-top: 12px;
+    padding: 12px;
+    background: #f5f5f5;
+    border-radius: 8px;
+}
+
+.index-info .index-name {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.index-info .formula {
+    display: block;
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 8px;
+}
+
+.index-info .required-bands {
+    font-size: 12px;
+    color: #888;
+}
+
+.band-mapping {
+    margin-bottom: 16px;
+}
+
+.mapping-row {
+    margin-bottom: 12px;
+}
+
+.mapping-row .band-type {
+    font-weight: 500;
+    margin-bottom: 4px;
+    color: #333;
+}
+
+.colormap-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.colormap-selector span {
+    font-size: 13px;
+    color: #666;
+}
+
+.vegetation-panel .ant-statistic {
+    text-align: center;
+}
+
+.vegetation-panel .ant-statistic-title {
+    font-size: 12px;
+}
+
+.vegetation-panel .ant-statistic-content {
+    font-size: 18px;
+}

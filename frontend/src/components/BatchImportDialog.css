@@ -1,0 +1,48 @@
+/**
+ * 批次导入对话框样式
+ */
+
+.band-upload-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.band-upload-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: #f5f5f5;
+    border-radius: 8px;
+    border: 1px solid #e8e8e8;
+}
+
+.band-upload-item .band-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 500;
+    color: #333;
+}
+
+.band-upload-item .band-label .anticon {
+    font-size: 18px;
+    color: #1890ff;
+}
+
+.upload-progress {
+    padding: 40px 20px;
+}
+
+/* 暗色模式支持 */
+@media (prefers-color-scheme: dark) {
+    .band-upload-item {
+        background: #262626;
+        border-color: #434343;
+    }
+
+    .band-upload-item .band-label {
+        color: #fff;
+    }
+}

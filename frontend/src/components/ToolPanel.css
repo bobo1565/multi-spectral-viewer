@@ -1,0 +1,73 @@
+.tool-panel {
+    height: 100%;
+    overflow-y: auto;
+}
+
+.tool-panel .ant-card-body {
+    padding: 8px;
+}
+
+.tool-panel .no-image {
+    text-align: center;
+    color: #999;
+    padding: 24px;
+}
+
+.histogram-container {
+    padding: 8px 0;
+    min-height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.histogram-container .no-data {
+    color: #999;
+}
+
+.slider-group {
+    padding: 8px 0;
+}
+
+.slider-group .ant-row {
+    margin-bottom: 8px;
+}
+
+.slider-group .label {
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.slider-group .label.red {
+    background: rgba(255, 77, 79, 0.1);
+    color: #ff4d4f;
+}
+
+.slider-group .label.green {
+    background: rgba(82, 196, 26, 0.1);
+    color: #52c41a;
+}
+
+.slider-group .label.blue {
+    background: rgba(24, 144, 255, 0.1);
+    color: #1890ff;
+}
+
+.slider-group .value {
+    font-family: monospace;
+    font-size: 12px;
+    color: #666;
+}
+
+.slider-group .value-display {
+    text-align: center;
+    font-size: 12px;
+    color: #666;
+    margin-top: 8px;
+}
+
+.slider-group button {
+    width: 100%;
+    margin-top: 8px;
+}

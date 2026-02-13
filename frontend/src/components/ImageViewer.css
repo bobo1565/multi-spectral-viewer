@@ -1,0 +1,159 @@
+.image-viewer {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.image-viewer.empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.image-viewer .placeholder {
+    color: #999;
+    font-size: 16px;
+}
+
+.image-viewer .ant-card-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    overflow: hidden;
+}
+
+.zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.zoom-controls span {
+    min-width: 50px;
+    text-align: center;
+}
+
+.zoom-controls .anticon {
+    cursor: pointer;
+    font-size: 16px;
+    transition: color 0.2s;
+}
+
+.zoom-controls .anticon:hover {
+    color: #1890ff;
+}
+
+.viewer-container {
+    flex: 1;
+    overflow: hidden;
+    background: #1a1a1a;
+    border-radius: 8px;
+    position: relative;
+    cursor: grab;
+}
+
+.viewer-container:active {
+    cursor: grabbing;
+}
+
+.viewer-container img {
+    position: absolute;
+    max-width: none;
+    max-height: none;
+    transform-origin: 0 0;
+    user-select: none;
+}
+
+.loading-spin {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+/* 像素状态栏 */
+.pixel-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 12px;
+    color: #666;
+    font-size: 12px;
+    font-family: 'Monaco', 'Consolas', monospace;
+    border-top: 1px solid #f0f0f0;
+    margin-top: 8px;
+    background: #fafafa;
+    border-radius: 4px;
+}
+
+.pixel-status-bar .info-item {
+    color: #888;
+}
+
+.pixel-status-bar .divider {
+    color: #ddd;
+}
+
+.pixel-status-bar .coord {
+    color: #333;
+    font-weight: 500;
+}
+
+.pixel-status-bar .pixel-rgb {
+    display: flex;
+    gap: 12px;
+}
+
+.pixel-status-bar .pixel-rgb .r {
+    color: #ff4d4f;
+    font-weight: 500;
+}
+
+.pixel-status-bar .pixel-rgb .g {
+    color: #52c41a;
+    font-weight: 500;
+}
+
+.pixel-status-bar .pixel-rgb .b {
+    color: #1890ff;
+    font-weight: 500;
+}
+
+.pixel-status-bar .pixel-gray {
+    color: #333;
+    font-weight: 500;
+}
+
+.pixel-status-bar .hint {
+    color: #999;
+    font-style: italic;
+}
+
+.channel-badge {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-left: 12px;
+    font-weight: normal;
+}
+
+.channel-badge.channel-rgb {
+    background: linear-gradient(90deg, rgba(255, 77, 79, 0.2), rgba(82, 196, 26, 0.2), rgba(24, 144, 255, 0.2));
+    color: #333;
+}
+
+.channel-badge.channel-r {
+    background: rgba(255, 77, 79, 0.15);
+    color: #ff4d4f;
+}
+
+.channel-badge.channel-g {
+    background: rgba(82, 196, 26, 0.15);
+    color: #52c41a;
+}
+
+.channel-badge.channel-b {
+    background: rgba(24, 144, 255, 0.15);
+    color: #1890ff;
+}

@@ -1,0 +1,11 @@
+.alignment-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.alignment-panel .ant-card-body {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
