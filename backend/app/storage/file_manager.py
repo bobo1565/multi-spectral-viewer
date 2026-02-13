@@ -12,9 +12,11 @@ from datetime import datetime
 
 
 class FileManager:
-    """管理上传文件的存储"""
     
-    def __init__(self, upload_dir: str = "/app/uploads"):
+    def __init__(self, upload_dir: str = None):
+        if upload_dir is None:
+            PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+            upload_dir = str(PROJECT_ROOT / "uploads")
         self.upload_dir = Path(upload_dir)
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         

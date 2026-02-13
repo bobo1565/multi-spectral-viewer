@@ -18,7 +18,10 @@ from app.core.feature_matching_algo import (
 )
 
 class ImageAlignerService:
-    def __init__(self, upload_dir: str = "/app/uploads"):
+    def __init__(self, upload_dir: str = None):
+        if upload_dir is None:
+            PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+            upload_dir = str(PROJECT_ROOT / "uploads")
         self._roi_config = self._load_default_roi()
         self._feature_detector = 'SIFT'
         self._upload_dir = Path(upload_dir)

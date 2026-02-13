@@ -2,9 +2,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
+from pathlib import Path
 
-# 数据库文件保存到 /app/uploads/data 目录，确保容器重启后数据持久化
-DATA_DIR = "/app/uploads/data"
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+DATA_DIR = str(PROJECT_ROOT / "uploads" / "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{DATA_DIR}/sql_app.db"

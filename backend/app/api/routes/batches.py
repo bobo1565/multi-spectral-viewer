@@ -5,6 +5,10 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import os
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
+UPLOAD_DIR = str(PROJECT_ROOT / "uploads")
 
 from app.api.models import BatchCreate, BatchInfo, BatchImageInfo, BAND_TYPES
 from app.storage.file_manager import file_manager
@@ -20,8 +24,7 @@ def _image_to_batch_image_info(img) -> Optional[BatchImageInfo]:
     if img is None:
         return None
     
-    # 调试：打印filepath和生成的URL
-    rel_path = os.path.relpath(img.filepath, '/app/uploads')
+    rel_path = os.path.relpath(img.filepath, UPLOAD_DIR)
     url = f"/uploads/{rel_path}"
     print(f"[BatchImageInfo] filepath={img.filepath}, rel_path={rel_path}, url={url}")
     

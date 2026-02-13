@@ -7,6 +7,9 @@ import os
 import shutil
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
+UPLOAD_DIR = str(PROJECT_ROOT / "uploads")
+
 from app.core.image_aligner_service import ImageAlignerService
 from app.database import get_db
 from app.services.image_db_service import ImageDBService
@@ -56,7 +59,7 @@ async def batch_align(request: AlignmentBatchRequest, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="批次中没有图像")
 
     # 定义目录
-    upload_root = Path("/app/uploads")
+    upload_root = Path(UPLOAD_DIR)
     batch_dir = upload_root / batch_id
     source_dir = batch_dir / "source"
     

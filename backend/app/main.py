@@ -5,8 +5,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
+from pathlib import Path
 
-from app.api.routes import images, processing, blending, vegetation, alignment, batches
+# 获取项目根目录
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+UPLOAD_DIR = str(PROJECT_ROOT / "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = FastAPI(
     title="多光谱图像分析系统",
@@ -14,20 +18,17 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# CORS配置 - 允许前端访问
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境应该限制具体域名
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 挂载静态文件目录
-UPLOAD_DIR = "/app/uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
+from app.api.routes import images, processing, blending, vegetation, alignment, batches
 from app.database import engine, Base, SessionLocal
 from app.services.image_db_service import ImageDBService
 from app.storage.file_manager import file_manager
