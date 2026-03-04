@@ -2,7 +2,8 @@ import { useState, useMemo, useEffect } from 'react';
 import { Card, Button, Checkbox, message, Alert, Select, Form } from 'antd';
 import { SyncOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import type { BatchInfo, ImageInfo } from '../types';
-import { alignmentService } from '../services/api';
+import { alignmentService, api } from '../services/api';
+import ROICanvas from './ROICanvas';
 import './AlignmentPanel.css'; // Assume CSS exists or styling is inline
 
 interface Props {
@@ -16,6 +17,8 @@ export default function AlignmentPanel({ batch, batchId, onAlignmentComplete }: 
     const [overwrite, setOverwrite] = useState<boolean>(true);
     const [loading, setLoading] = useState(false);
     const [selectedRefId, setSelectedRefId] = useState<string | null>(null);
+    const [enableRoi, setEnableRoi] = useState(false);
+    const [customRoi, setCustomRoi] = useState<{ x: number, y: number, width: number, height: number } | null>(null);
 
     const actualBatchId = batch?.id || batchId;
 
@@ -53,6 +56,19 @@ export default function AlignmentPanel({ batch, batchId, onAlignmentComplete }: 
         }
     }, [sourceImages]);
 
+    const refImageUrl = useMemo(() => {
+        if (!selectedRefId || !batch) return null;
+        let p = '';
+        Object.values(batch.source_images || {}).forEach(img => {
+            if (img && img.id === selectedRefId) {
+                p = img.filepath;
+            }
+        });
+        if (!p) return null;
+        // Fix path to url logic
+        return api.defaults.baseURL + '/uploads/' + p;
+    }, [selectedRefId, batch]);
+
     const handleAlign = async () => {
         if (!actualBatchId) {
             message.error('请先选择一个批次');
@@ -61,10 +77,12 @@ export default function AlignmentPanel({ batch, batchId, onAlignmentComplete }: 
 
         setLoading(true);
         try {
+            const roiParam = enableRoi && customRoi ? customRoi : undefined;
             const result = await alignmentService.batchAlign(
                 actualBatchId,
                 overwrite,
-                selectedRefId || undefined
+                selectedRefId || undefined,
+                roiParam
             );
 
             // 显示结果信息
@@ -131,6 +149,24 @@ export default function AlignmentPanel({ batch, batchId, onAlignmentComplete }: 
                         覆盖同名文件 (在相同输出目录下)
                     </Checkbox>
                 </Form.Item>
+
+                <Form.Item style={{ marginBottom: 12 }}>
+                    <Checkbox
+                        checked={enableRoi}
+                        onChange={e => setEnableRoi(e.target.checked)}
+                    >
+                        启用手动绘制 ROI (局部高精度对齐)
+                    </Checkbox>
+                </Form.Item>
+
+                {enableRoi && refImageUrl && (
+                    <Form.Item label="绘制 ROI">
+                        <ROICanvas
+                            imageUrl={refImageUrl}
+                            onROIChange={setCustomRoi}
+                        />
+                    </Form.Item>
+                )}
 
                 <Button
                     type="primary"

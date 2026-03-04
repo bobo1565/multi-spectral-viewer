@@ -80,7 +80,7 @@ class ImageAlignerService:
         return new_file_id, str(new_filepath), aligned_filename
 
     def align_batch(self, reference_path: str, target_paths: list, output_dir: str, 
-                           overwrite: bool = True) -> dict:
+                           overwrite: bool = True, custom_roi: dict = None) -> dict:
         """
         执行批量对齐，并将结果保存到指定目录
         
@@ -89,6 +89,7 @@ class ImageAlignerService:
             target_paths: 目标图像路径列表
             output_dir: 输出目录 (aligned/)
             overwrite: 是否覆盖输出目录中已存在的文件
+            custom_roi: 手动指定的ROI配置，形如 {"roi_x_ratio":...}
             
         Returns:
             dict: {original_path: (success, message, new_file_info)}
@@ -120,11 +121,13 @@ class ImageAlignerService:
                     results[path] = (False, f"无法加载目标图: {path}", None)
                     continue
                 
+                applied_roi = custom_roi if custom_roi else self._roi_config
+                
                 aligned = align_images(
                     ref_img, 
                     tgt_img, 
-                    roi_config1=self._roi_config, 
-                    roi_config2=self._roi_config,
+                    roi_config1=applied_roi, 
+                    roi_config2=applied_roi,
                     feature_detector_type=self._feature_detector
                 )
                 

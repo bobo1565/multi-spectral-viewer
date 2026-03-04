@@ -18,10 +18,17 @@ from app.api.models import BAND_TYPES
 
 router = APIRouter()
 
+class ROICoords(BaseModel):
+    x: float
+    y: float
+    width: float
+    height: float
+
 class AlignmentBatchRequest(BaseModel):
     batch_id: str
     overwrite: bool = True
     reference_image_id: Optional[str] = None
+    roi: Optional[ROICoords] = None
 
 class NewFileInfo(BaseModel):
     id: str
@@ -150,6 +157,16 @@ async def batch_align(request: AlignmentBatchRequest, db: Session = Depends(get_
         if path != ref_path:
             target_paths.append(path)
 
+    # 处理自定义 ROI
+    custom_roi_dict = None
+    if request.roi:
+        custom_roi_dict = {
+            "roi_x_ratio": request.roi.x,
+            "roi_y_ratio": request.roi.y,
+            "roi_width_ratio": request.roi.width,
+            "roi_height_ratio": request.roi.height
+        }
+
     # 2. 调用对齐服务
     service = ImageAlignerService()
     
@@ -158,7 +175,8 @@ async def batch_align(request: AlignmentBatchRequest, db: Session = Depends(get_
             ref_path,
             target_paths,
             str(aligned_dir),
-            overwrite=request.overwrite
+            overwrite=request.overwrite,
+            custom_roi=custom_roi_dict
         )
         
         # 3. 处理结果

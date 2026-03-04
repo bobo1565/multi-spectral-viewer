@@ -95,12 +95,16 @@ export const blendingService = {
 
 // 图像对齐
 export const alignmentService = {
-    async batchAlign(batchId: string, overwrite: boolean = true, referenceImageId?: string): Promise<any> {
-        const response = await api.post('/api/alignment/batch-align', {
+    async batchAlign(batchId: string, overwrite: boolean = true, referenceImageId?: string, roi?: { x: number, y: number, width: number, height: number }): Promise<any> {
+        const payload: any = {
             batch_id: batchId,
             overwrite,
             reference_image_id: referenceImageId
-        });
+        };
+        if (roi) {
+            payload.roi = roi;
+        }
+        const response = await api.post('/api/alignment/batch-align', payload);
         return response.data;
     }
 };
