@@ -174,6 +174,29 @@ export default function AlignmentPanel({ batch, batchId, onAlignmentComplete, ro
                                         清除选区
                                     </Button>
                                 </div>
+                                <Button
+                                    size="small"
+                                    type="dashed"
+                                    disabled={loading}
+                                    onClick={async () => {
+                                        try {
+                                            setLoading(true);
+                                            await alignmentService.updateRoiConfig({
+                                                roi_x_ratio: roi.x,
+                                                roi_y_ratio: roi.y,
+                                                roi_width_ratio: roi.width,
+                                                roi_height_ratio: roi.height
+                                            });
+                                            message.success('已将当前选区保存为全局默认 ROI 配置 (matching.json)');
+                                        } catch (error) {
+                                            message.error('保存默认 ROI 失败');
+                                        } finally {
+                                            setLoading(false);
+                                        }
+                                    }}
+                                >
+                                    保存当前选区为全局默认
+                                </Button>
                             </div>
                         ) : (
                             <Button

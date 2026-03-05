@@ -94,6 +94,13 @@ export const blendingService = {
 };
 
 // 图像对齐
+export interface ROIConfig {
+    roi_x_ratio: number;
+    roi_y_ratio: number;
+    roi_width_ratio: number;
+    roi_height_ratio: number;
+}
+
 export const alignmentService = {
     async batchAlign(batchId: string, overwrite: boolean = true, referenceImageId?: string, roi?: { x: number, y: number, width: number, height: number }): Promise<any> {
         const payload: any = {
@@ -105,6 +112,16 @@ export const alignmentService = {
             payload.roi = roi;
         }
         const response = await api.post('/api/alignment/batch-align', payload);
+        return response.data;
+    },
+
+    async getRoiConfig(): Promise<ROIConfig> {
+        const response = await api.get('/api/alignment/roi-config');
+        return response.data;
+    },
+
+    async updateRoiConfig(config: ROIConfig): Promise<ROIConfig> {
+        const response = await api.put('/api/alignment/roi-config', config);
         return response.data;
     }
 };
@@ -128,6 +145,10 @@ export const batchService = {
 
     async deleteBatch(batchId: string): Promise<void> {
         await api.delete(`/api/batches/${batchId}`);
+    },
+
+    async deleteBatchImages(batchId: string, imageType: 'source' | 'aligned'): Promise<void> {
+        await api.delete(`/api/batches/${batchId}/images/${imageType}`);
     },
 
     async importImages(

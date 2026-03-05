@@ -1,21 +1,7 @@
 {
-  "roi_x_ratio": 0.2652,
-  "roi_y_ratio": 0,
-  "roi_width_ratio": 0.479,
-  "roi_height_ratio": 1,
-  "description": "ROI配置文件 - 用于控制特征匹配时的感兴趣区域",
-  "examples": {
-    "center_half": {
-      "roi_x_ratio": 0.25,
-      "roi_y_ratio": 0.25,
-      "roi_width_ratio": 0.5,
-      "roi_height_ratio": 0.5
-    },
-    "full_image": {
-      "roi_x_ratio": 0.0,
-      "roi_y_ratio": 0.0,
-      "roi_width_ratio": 1.0,
-      "roi_height_ratio": 1.0
-    }
-  }
+  "roi_x_ratio": 0.25,
+  "roi_y_ratio": 0.25,
+  "roi_width_ratio": 0.5,
+  "roi_height_ratio": 0.5,
+  "description": "默认ROI配置 - 中间50%区域用于特征匹配"
 }

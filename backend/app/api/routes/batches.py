@@ -107,15 +107,39 @@ async def delete_batch(batch_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="批次不存在")
     
     # 删除批次中所有图像的物理文件
-    images_dict = BatchDBService.get_batch_images(db, batch_id)
-    for band, img in images_dict.items():
-        if img:
-            file_manager.delete_file(img.id)
+    all_images = BatchDBService.get_all_batch_images_list(db, batch_id)
+    for img in all_images:
+        file_manager.delete_file(img.id)
     
     # 删除批次（会级联删除数据库中的图像记录）
     BatchDBService.delete_batch(db, batch_id)
     
     return {"message": "批次删除成功", "id": batch_id}
+
+
+@router.delete("/{batch_id}/images/{image_type}")
+async def delete_batch_images_by_type(batch_id: str, image_type: str, db: Session = Depends(get_db)):
+    """删除批次中指定类型（source 或 aligned）的所有图像"""
+    batch = BatchDBService.get_batch(db, batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="批次不存在")
+        
+    if image_type not in ["source", "aligned"]:
+        raise HTTPException(status_code=400, detail="未知的图像类型，只能是 'source' 或 'aligned'")
+        
+    all_images = BatchDBService.get_all_batch_images_list(db, batch_id)
+    deleted_count = 0
+    
+    for img in all_images:
+        current_type = getattr(img, 'image_type', None) or ('aligned' if '/aligned/' in img.filepath else 'source')
+        if current_type == image_type:
+            # 物理文件删除
+            file_manager.delete_file(img.id)
+            # 数据库记录删除
+            ImageDBService.delete_image(db, img.id)
+            deleted_count += 1
+            
+    return {"message": f"成功删除 {deleted_count} 个 {image_type} 图像"}
 
 
 @router.post("/{batch_id}/import", response_model=BatchInfo)

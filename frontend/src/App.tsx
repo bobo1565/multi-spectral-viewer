@@ -148,6 +148,32 @@ function App() {
         }
     };
 
+    const handleDeleteImage = async (imageId: string) => {
+        try {
+            await imageService.deleteImage(imageId);
+            message.success('图像删除成功');
+            await loadBatches();
+            if (selectedNode?.image?.id === imageId) {
+                setSelectedNode(null);
+            }
+        } catch (error) {
+            message.error('删除图像失败');
+        }
+    };
+
+    const handleDeleteBatchImages = async (batchId: string, imageType: 'source' | 'aligned') => {
+        try {
+            await batchService.deleteBatchImages(batchId, imageType);
+            message.success(`${imageType === 'source' ? 'Source' : 'Aligned'} 文件删除成功`);
+            await loadBatches();
+            if (selectedNode?.batchId === batchId && selectedNode?.imageType === imageType) {
+                setSelectedNode(null);
+            }
+        } catch (error) {
+            message.error(`删除 ${imageType} 失败`);
+        }
+    };
+
     const handlePixelHover = (x: number, y: number) => {
         setPixelPosition({ x, y });
     };
@@ -204,10 +230,33 @@ function App() {
                     return {
                         key: nodeKey,
                         title: (
-                            <div className={`channel-node ${img ? 'has-image' : 'no-image'}`}>
+                            <div className={`channel-node ${img ? 'has-image' : 'no-image'} tree-node-title`}>
                                 <FileImageOutlined />
                                 <span>{BAND_LABELS[band]}</span>
-                                {img && <span className="file-name">({img.filename})</span>}
+                                {img && (
+                                    <>
+                                        <span className="file-name node-name" style={{ marginLeft: 4 }}>({img.filename})</span>
+                                        <Popconfirm
+                                            title="确定删除此图像?"
+                                            onConfirm={(e) => {
+                                                e?.stopPropagation();
+                                                handleDeleteImage(img.id);
+                                            }}
+                                            onCancel={(e) => e?.stopPropagation()}
+                                            okText="确定"
+                                            cancelText="取消"
+                                        >
+                                            <Button
+                                                size="small"
+                                                danger
+                                                type="text"
+                                                icon={<DeleteOutlined />}
+                                                onClick={(e) => e.stopPropagation()}
+                                                className="delete-btn"
+                                            />
+                                        </Popconfirm>
+                                    </>
+                                )}
                             </div>
                         ),
                         children: [
@@ -289,8 +338,29 @@ function App() {
                         title: (
                             <div className="tree-node-title">
                                 <FolderOutlined />
-                                <span>Source</span>
+                                <span className="node-name">Source</span>
                                 <span className="node-size" style={{ fontSize: '10px', marginLeft: 4 }}>({sourceCount})</span>
+                                {sourceCount > 0 && (
+                                    <Popconfirm
+                                        title="确定删除所有 Source 图像?"
+                                        onConfirm={(e) => {
+                                            e?.stopPropagation();
+                                            handleDeleteBatchImages(batch.id, 'source');
+                                        }}
+                                        onCancel={(e) => e?.stopPropagation()}
+                                        okText="确定"
+                                        cancelText="取消"
+                                    >
+                                        <Button
+                                            size="small"
+                                            danger
+                                            type="text"
+                                            icon={<DeleteOutlined />}
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="delete-btn"
+                                        />
+                                    </Popconfirm>
+                                )}
                             </div>
                         ),
                         children: generateBandNodes(batch.id, 'source', sourceImgs)
@@ -300,8 +370,29 @@ function App() {
                         title: (
                             <div className="tree-node-title">
                                 <FolderOutlined />
-                                <span>Aligned</span>
+                                <span className="node-name">Aligned</span>
                                 <span className="node-size" style={{ fontSize: '10px', marginLeft: 4 }}>({alignedCount})</span>
+                                {alignedCount > 0 && (
+                                    <Popconfirm
+                                        title="确定删除所有 Aligned 图像?"
+                                        onConfirm={(e) => {
+                                            e?.stopPropagation();
+                                            handleDeleteBatchImages(batch.id, 'aligned');
+                                        }}
+                                        onCancel={(e) => e?.stopPropagation()}
+                                        okText="确定"
+                                        cancelText="取消"
+                                    >
+                                        <Button
+                                            size="small"
+                                            danger
+                                            type="text"
+                                            icon={<DeleteOutlined />}
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="delete-btn"
+                                        />
+                                    </Popconfirm>
+                                )}
                             </div>
                         ),
                         children: generateBandNodes(batch.id, 'aligned', alignedImgs)

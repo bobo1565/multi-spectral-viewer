@@ -10,7 +10,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
 UPLOAD_DIR = str(PROJECT_ROOT / "uploads")
 
-from app.core.image_aligner_service import ImageAlignerService
+from app.core.image_aligner_service import ImageAlignerService, load_roi_config, save_roi_config
 from app.database import get_db
 from app.services.image_db_service import ImageDBService
 from app.services.batch_db_service import BatchDBService
@@ -23,6 +23,42 @@ class ROICoords(BaseModel):
     y: float
     width: float
     height: float
+
+class ROIConfigResponse(BaseModel):
+    roi_x_ratio: float
+    roi_y_ratio: float
+    roi_width_ratio: float
+    roi_height_ratio: float
+
+class ROIConfigUpdateRequest(BaseModel):
+    roi_x_ratio: float
+    roi_y_ratio: float
+    roi_width_ratio: float
+    roi_height_ratio: float
+
+
+@router.get("/roi-config", response_model=ROIConfigResponse)
+async def get_roi_config():
+    """获取当前默认 ROI 配置"""
+    config = load_roi_config()
+    return config
+
+
+@router.put("/roi-config", response_model=ROIConfigResponse)
+async def update_roi_config(request: ROIConfigUpdateRequest):
+    """更新默认 ROI 配置（写入 matching.json，立即生效）"""
+    new_config = {
+        "roi_x_ratio": request.roi_x_ratio,
+        "roi_y_ratio": request.roi_y_ratio,
+        "roi_width_ratio": request.roi_width_ratio,
+        "roi_height_ratio": request.roi_height_ratio,
+    }
+    save_roi_config(new_config)
+    return new_config
+
+
+
+
 
 class AlignmentBatchRequest(BaseModel):
     batch_id: str
