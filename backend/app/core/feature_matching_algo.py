@@ -127,7 +127,7 @@ def crop_image(img, region):
 def align_images(img1_color, img2_color, roi_config1=None, roi_config2=None,
                  feature_detector_type='SIFT',
                  ratio_test_thresh=0.70, min_match_count=10,
-                 use_ecc=True, min_inlier_ratio=0.15, min_inlier_count=50):
+                 use_ecc=False, min_inlier_ratio=0.15, min_inlier_count=50):
     """
     将 img2_color 配准到 img1_color 的坐标系。
 

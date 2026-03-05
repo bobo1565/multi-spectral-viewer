@@ -9,6 +9,7 @@ import { batchService, imageService } from './services/api';
 import type { BatchInfo, BandType, ImageInfo, BatchImageInfo } from './types';
 import { BAND_TYPES, BAND_LABELS } from './types';
 import { ImageViewer, ToolPanel, BlendPanel, VegetationPanel, AlignmentPanel, BatchImportDialog } from './components';
+import ROICanvas, { type ROICoords } from './components/ROICanvas';
 import './App.css';
 
 const { Header, Content, Sider } = Layout;
@@ -48,6 +49,19 @@ function App() {
     const [sortBy, setSortBy] = useState<'name' | 'time'>('time'); // 排序方式
     const [blendedImageUrl, setBlendedImageUrl] = useState<string | null>(null); // 混合预览图
     const [importDialogOpen, setImportDialogOpen] = useState(false);
+
+    // ROI 绘制模式
+    const [roiDrawMode, setRoiDrawMode] = useState(false);
+    const [currentRoi, setCurrentRoi] = useState<ROICoords | null>(null);
+
+    // ESC 退出绘制模式
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape' && roiDrawMode) setRoiDrawMode(false);
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [roiDrawMode]);
 
     // 图像处理状态
     const [colormap, setColormap] = useState('gray'); // 色带
@@ -459,6 +473,9 @@ function App() {
                 batch={selectedNode?.batchId ? batches.find((b: BatchInfo) => b.id === selectedNode.batchId) : null}
                 batchId={selectedNode?.batchId}
                 onAlignmentComplete={handleAlignmentComplete}
+                roi={currentRoi}
+                onStartDrawROI={() => setRoiDrawMode(true)}
+                onClearROI={() => { setCurrentRoi(null); setRoiDrawMode(false); }}
             />,
         },
         {
@@ -545,7 +562,7 @@ function App() {
                 />
 
                 {/* 中间图像查看器 */}
-                <Content className="viewer-content">
+                <Content className="viewer-content" style={{ position: 'relative' }}>
                     <ImageViewer
                         image={selectedNode?.image || null}
                         blendedUrl={blendedImageUrl}
@@ -554,8 +571,17 @@ function App() {
                         whiteBalance={whiteBalance}
                         saturation={saturation}
                         onHistogramChange={setHistogram}
-                        onPixelHover={handlePixelHover}
+                        onPixelHover={roiDrawMode ? undefined : handlePixelHover}
                     />
+                    {roiDrawMode && (
+                        <ROICanvas
+                            roi={currentRoi}
+                            onROIDraw={(r) => {
+                                setCurrentRoi(r);
+                                setRoiDrawMode(false);
+                            }}
+                        />
+                    )}
                 </Content>
 
                 <div

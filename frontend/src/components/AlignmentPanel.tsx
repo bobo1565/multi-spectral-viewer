@@ -1,38 +1,38 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Card, Button, Checkbox, message, Alert, Select, Form } from 'antd';
-import { SyncOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { Card, Button, Checkbox, message, Alert, Select, Form, Tag } from 'antd';
+import { SyncOutlined, ThunderboltOutlined, AimOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import type { BatchInfo, ImageInfo } from '../types';
-import { alignmentService, api } from '../services/api';
-import ROICanvas from './ROICanvas';
-import './AlignmentPanel.css'; // Assume CSS exists or styling is inline
+import { alignmentService } from '../services/api';
+import type { ROICoords } from './ROICanvas';
+import './AlignmentPanel.css';
 
 interface Props {
-    images?: ImageInfo[]; // Deprecated, use batch instead
+    images?: ImageInfo[];
     batch?: BatchInfo | null;
-    batchId?: string; // Keep for backward compatibility if needed
+    batchId?: string;
     onAlignmentComplete?: () => void;
+    /** 当前已绘制的 ROI（来自主画面），由父组件注入 */
+    roi?: ROICoords | null;
+    /** 点击"绘制 ROI"按钮时触发，父组件负责打开主画面绘图模式 */
+    onStartDrawROI?: () => void;
+    /** 点击"清除 ROI" */
+    onClearROI?: () => void;
 }
 
-export default function AlignmentPanel({ batch, batchId, onAlignmentComplete }: Props) {
+export default function AlignmentPanel({ batch, batchId, onAlignmentComplete, roi, onStartDrawROI, onClearROI }: Props) {
     const [overwrite, setOverwrite] = useState<boolean>(true);
     const [loading, setLoading] = useState(false);
     const [selectedRefId, setSelectedRefId] = useState<string | null>(null);
     const [enableRoi, setEnableRoi] = useState(false);
-    const [customRoi, setCustomRoi] = useState<{ x: number, y: number, width: number, height: number } | null>(null);
 
     const actualBatchId = batch?.id || batchId;
 
-    // 获取 Source 图像列表
     const sourceImages = useMemo(() => {
         if (!batch) return [];
         const imgs: { label: string; value: string; band: string }[] = [];
-
-        // Handle source_images object
         const sourceMap = batch.source_images || batch.images || {};
-
         Object.entries(sourceMap).forEach(([band, img]) => {
             if (img) {
-                // Filter out if it's explicitly marked as aligned (though checking source_images map should be enough)
                 imgs.push({
                     label: `${band.toUpperCase()} - ${img.filename}`,
                     value: img.id,
@@ -40,34 +40,22 @@ export default function AlignmentPanel({ batch, batchId, onAlignmentComplete }: 
                 });
             }
         });
-
         return imgs;
     }, [batch]);
 
-    // Set default reference ID (RGB)
     useEffect(() => {
         if (sourceImages.length > 0 && !selectedRefId) {
             const rgb = sourceImages.find(i => i.band === 'rgb');
-            if (rgb) {
-                setSelectedRefId(rgb.value);
-            } else {
-                setSelectedRefId(sourceImages[0].value);
-            }
+            setSelectedRefId(rgb ? rgb.value : sourceImages[0].value);
         }
     }, [sourceImages]);
 
-    const refImageUrl = useMemo(() => {
-        if (!selectedRefId || !batch) return null;
-        let p = '';
-        Object.values(batch.source_images || {}).forEach(img => {
-            if (img && img.id === selectedRefId) {
-                p = img.filepath;
-            }
-        });
-        if (!p) return null;
-        // Fix path to url logic
-        return api.defaults.baseURL + '/uploads/' + p;
-    }, [selectedRefId, batch]);
+    // 切换 enableRoi 关闭时清除 ROI
+    useEffect(() => {
+        if (!enableRoi) {
+            onClearROI?.();
+        }
+    }, [enableRoi]);
 
     const handleAlign = async () => {
         if (!actualBatchId) {
@@ -77,7 +65,7 @@ export default function AlignmentPanel({ batch, batchId, onAlignmentComplete }: 
 
         setLoading(true);
         try {
-            const roiParam = enableRoi && customRoi ? customRoi : undefined;
+            const roiParam = enableRoi && roi ? roi : undefined;
             const result = await alignmentService.batchAlign(
                 actualBatchId,
                 overwrite,
@@ -85,14 +73,12 @@ export default function AlignmentPanel({ batch, batchId, onAlignmentComplete }: 
                 roiParam
             );
 
-            // 显示结果信息
             if (result.new_images && result.new_images.length > 0) {
                 message.success(`${result.summary}，已生成 ${result.new_images.length} 个新文件`);
             } else {
                 message.success(result.summary || '对齐完成');
             }
 
-            // 刷新图像列表
             if (onAlignmentComplete) {
                 onAlignmentComplete();
             }
@@ -159,12 +145,47 @@ export default function AlignmentPanel({ batch, batchId, onAlignmentComplete }: 
                     </Checkbox>
                 </Form.Item>
 
-                {enableRoi && refImageUrl && (
-                    <Form.Item label="绘制 ROI">
-                        <ROICanvas
-                            imageUrl={refImageUrl}
-                            onROIChange={setCustomRoi}
-                        />
+                {/* ROI 绘制区 */}
+                {enableRoi && (
+                    <Form.Item label="ROI 选区" style={{ marginBottom: 16 }}>
+                        {roi ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                <Tag color="success" icon={<AimOutlined />} style={{ width: 'fit-content' }}>
+                                    已选 {(roi.x * 100).toFixed(1)}%, {(roi.y * 100).toFixed(1)}%
+                                    &nbsp;→&nbsp;
+                                    {((roi.x + roi.width) * 100).toFixed(1)}%, {((roi.y + roi.height) * 100).toFixed(1)}%
+                                </Tag>
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                    <Button
+                                        size="small"
+                                        icon={<AimOutlined />}
+                                        onClick={onStartDrawROI}
+                                        disabled={loading}
+                                    >
+                                        重新绘制
+                                    </Button>
+                                    <Button
+                                        size="small"
+                                        danger
+                                        icon={<CloseCircleOutlined />}
+                                        onClick={onClearROI}
+                                        disabled={loading}
+                                    >
+                                        清除选区
+                                    </Button>
+                                </div>
+                            </div>
+                        ) : (
+                            <Button
+                                icon={<AimOutlined />}
+                                onClick={onStartDrawROI}
+                                disabled={loading}
+                                type="dashed"
+                                block
+                            >
+                                在主画面中绘制 ROI
+                            </Button>
+                        )}
                     </Form.Item>
                 )}
 
@@ -174,9 +195,9 @@ export default function AlignmentPanel({ batch, batchId, onAlignmentComplete }: 
                     icon={<SyncOutlined spin={loading} />}
                     onClick={handleAlign}
                     loading={loading}
-                    disabled={!selectedRefId}
+                    disabled={!selectedRefId || (enableRoi && !roi)}
                 >
-                    执行批量对齐
+                    {enableRoi && !roi ? '请先绘制 ROI' : '执行批量对齐'}
                 </Button>
             </Form>
 
