@@ -1,0 +1,72 @@
+/* SAM2 物体选择覆盖层样式 */
+
+.sam2-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    cursor: crosshair;
+}
+
+.sam2-overlay.sam2-loading {
+    cursor: wait;
+    pointer-events: auto;
+}
+
+/* 掩码覆盖层：半透明绿色 */
+.sam2-mask-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+    pointer-events: none;
+    /* 绿色通道混合：白色掩码区域显示为半透明绿色 */
+    mix-blend-mode: screen;
+    opacity: 0.5;
+    filter: sepia(1) saturate(5) hue-rotate(80deg);
+}
+
+/* 点击标记 */
+.sam2-click-marker {
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: rgba(255, 50, 50, 0.8);
+    border: 2px solid #fff;
+    box-shadow: 0 0 8px rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+    z-index: 25;
+    animation: sam2-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes sam2-pulse {
+
+    0%,
+    100% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.3);
+    }
+}
+
+/* 提示文字 */
+.sam2-hint-label {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 13px;
+    pointer-events: none;
+    z-index: 30;
+    white-space: nowrap;
+    backdrop-filter: blur(4px);
+}

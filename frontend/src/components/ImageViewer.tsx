@@ -27,6 +27,7 @@ interface Props {
     saturation?: number;
     onHistogramChange?: (histogram: { r: number[], g: number[], b: number[] }) => void;
     onPixelHover?: (x: number, y: number) => void;
+    onTransformChange?: (transform: { scale: number; offsetX: number; offsetY: number }) => void;
 }
 
 export default function ImageViewer({
@@ -37,7 +38,8 @@ export default function ImageViewer({
     whiteBalance = { r: 1, g: 1, b: 1 },
     saturation = 1,
     onHistogramChange,
-    onPixelHover
+    onPixelHover,
+    onTransformChange,
 }: Props) {
     const [scale, setScale] = useState(1);
     const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -65,13 +67,15 @@ export default function ImageViewer({
         const iw = image.width;
         const ih = image.height;
 
-        const s = Math.min(cw / iw, ch / ih, 1) * 0.9;
-        setScale(s);
-        setOffset({
-            x: (cw - iw * s) / 2,
-            y: (ch - ih * s) / 2
-        });
-    }, [image]);
+        const newScale = Math.min(cw / iw, ch / ih, 1) * 0.9;
+        const newOffset = {
+            x: (cw - iw * newScale) / 2,
+            y: (ch - ih * newScale) / 2
+        };
+        setScale(newScale);
+        setOffset(newOffset);
+        onTransformChange?.({ scale: newScale, offsetX: newOffset.x, offsetY: newOffset.y });
+    }, [image, onTransformChange]);
 
     // 加载图片
     useEffect(() => {
@@ -117,7 +121,11 @@ export default function ImageViewer({
             const dx = e.clientX - lastMouseRef.current.x;
             const dy = e.clientY - lastMouseRef.current.y;
 
-            setOffset((prev: { x: number; y: number }) => ({ x: prev.x + dx, y: prev.y + dy }));
+            setOffset((prev: { x: number; y: number }) => {
+                const newOffset = { x: prev.x + dx, y: prev.y + dy };
+                onTransformChange?.({ scale, offsetX: newOffset.x, offsetY: newOffset.y });
+                return newOffset;
+            });
             lastMouseRef.current = { x: e.clientX, y: e.clientY };
         };
 
@@ -165,6 +173,7 @@ export default function ImageViewer({
 
         setScale(newScale);
         setOffset({ x: ox, y: oy });
+        onTransformChange?.({ scale: newScale, offsetX: ox, offsetY: oy });
     };
 
     const loadImageUrl = async (url: string) => {
@@ -327,11 +336,13 @@ export default function ImageViewer({
         const zoomFactor = 1.2;
         const newScale = Math.min(scale * zoomFactor, 20);
         const ratio = newScale / scale;
-        setOffset({
+        const newOffset = {
             x: mx - ratio * (mx - offset.x),
             y: my - ratio * (my - offset.y)
-        });
+        };
+        setOffset(newOffset);
         setScale(newScale);
+        onTransformChange?.({ scale: newScale, offsetX: newOffset.x, offsetY: newOffset.y });
     };
 
     const handleZoomOut = () => {
@@ -342,11 +353,13 @@ export default function ImageViewer({
         const zoomFactor = 1 / 1.2;
         const newScale = Math.max(scale * zoomFactor, 0.05);
         const ratio = newScale / scale;
-        setOffset({
+        const newOffset = {
             x: mx - ratio * (mx - offset.x),
             y: my - ratio * (my - offset.y)
-        });
+        };
+        setOffset(newOffset);
         setScale(newScale);
+        onTransformChange?.({ scale: newScale, offsetX: newOffset.x, offsetY: newOffset.y });
     };
 
     const handleReset = () => resetView();

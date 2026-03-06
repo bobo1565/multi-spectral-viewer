@@ -7,6 +7,8 @@ import os
 import shutil
 from pathlib import Path
 
+from app.core import sam2_client
+
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
 UPLOAD_DIR = str(PROJECT_ROOT / "uploads")
 
@@ -57,6 +59,61 @@ async def update_roi_config(request: ROIConfigUpdateRequest):
     return new_config
 
 
+# ── SAM2 预览相关模型 ──────────────────────────
+class SAM2PreviewRequest(BaseModel):
+    image_id: str
+    point_x: int
+    point_y: int
+
+class SAM2PreviewResponse(BaseModel):
+    mask_b64: str
+    area: int
+    bbox: List[float]
+    score: float
+    point_x: int
+    point_y: int
+
+
+@router.post("/sam2-preview", response_model=SAM2PreviewResponse)
+async def sam2_preview(request: SAM2PreviewRequest, db: Session = Depends(get_db)):
+    """
+    SAM2 掩码预览：用户点击图像上的某个位置，返回该位置对应的物体掩码。
+    用于前端预览显示，让用户确认选择的物体。
+    """
+    # 查找图像
+    image = ImageDBService.get_image(db, request.image_id)
+    if not image:
+        raise HTTPException(status_code=404, detail="图像不存在")
+    
+    image_path = image.filepath
+    if not os.path.exists(image_path):
+        raise HTTPException(status_code=404, detail=f"图像文件不存在: {image_path}")
+    
+    # 调用 SAM2 点提示分割
+    try:
+        masks = sam2_client.segment_image_by_points(
+            image_path, 
+            [[request.point_x, request.point_y]]
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"SAM2 分割失败: {str(e)}")
+    
+    if not masks:
+        raise HTTPException(status_code=404, detail="SAM2 未检测到物体，请尝试点击其他位置")
+    
+    # 返回最大面积的掩码
+    best_mask = max(masks, key=lambda m: m["area"])
+    
+    return SAM2PreviewResponse(
+        mask_b64=best_mask["mask_b64"],
+        area=best_mask["area"],
+        bbox=best_mask["bbox"],
+        score=best_mask["score"],
+        point_x=request.point_x,
+        point_y=request.point_y,
+    )
+
+
 
 
 
@@ -65,6 +122,8 @@ class AlignmentBatchRequest(BaseModel):
     overwrite: bool = True
     reference_image_id: Optional[str] = None
     roi: Optional[ROICoords] = None
+    align_mode: Optional[str] = 'homography'  # 'homography' | 'optical_flow' | 'sam2_object'
+    sam2_points: Optional[List[List[int]]] = None  # [[x1,y1], [x2,y2]] 用户点选坐标
 
 class NewFileInfo(BaseModel):
     id: str
@@ -212,7 +271,9 @@ async def batch_align(request: AlignmentBatchRequest, db: Session = Depends(get_
             target_paths,
             str(aligned_dir),
             overwrite=request.overwrite,
-            custom_roi=custom_roi_dict
+            custom_roi=custom_roi_dict,
+            align_mode=request.align_mode or 'homography',
+            sam2_points=request.sam2_points,
         )
         
         # 3. 处理结果

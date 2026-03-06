@@ -7,23 +7,47 @@ import type { ROICoords } from './ROICanvas';
 import './AlignmentPanel.css';
 
 interface Props {
-    images?: ImageInfo[];
+    images: ImageInfo[];
     batch?: BatchInfo | null;
     batchId?: string;
-    onAlignmentComplete?: () => void;
+    onAlignmentComplete: () => Promise<void>;
     /** 当前已绘制的 ROI（来自主画面），由父组件注入 */
-    roi?: ROICoords | null;
+    roi: ROICoords | null;
     /** 点击"绘制 ROI"按钮时触发，父组件负责打开主画面绘图模式 */
-    onStartDrawROI?: () => void;
+    onStartDrawROI: () => void;
     /** 点击"清除 ROI" */
-    onClearROI?: () => void;
+    onClearROI: () => void;
+
+    // SAM2 交互属性
+    sam2ClickMode?: boolean;
+    onStartSam2Click?: () => void;
+    onCancelSam2Click?: () => void;
+    sam2MaskB64?: string | null;
+    sam2ClickPoint?: { x: number; y: number } | null;
+    setSam2MaskB64?: (b64: string | null) => void;
+    setSam2ClickPoint?: (pt: { x: number; y: number } | null) => void;
+    sam2Loading?: boolean;
+    setSam2Loading?: (l: boolean) => void;
 }
 
-export default function AlignmentPanel({ batch, batchId, onAlignmentComplete, roi, onStartDrawROI, onClearROI }: Props) {
+export default function AlignmentPanel({
+    batch,
+    batchId,
+    onAlignmentComplete,
+    roi,
+    onStartDrawROI,
+    onClearROI,
+    sam2ClickMode,
+    onStartSam2Click,
+    onCancelSam2Click,
+    sam2MaskB64,
+    sam2ClickPoint,
+    sam2Loading
+}: Props) {
     const [overwrite, setOverwrite] = useState<boolean>(true);
     const [loading, setLoading] = useState(false);
     const [selectedRefId, setSelectedRefId] = useState<string | null>(null);
-    const [enableRoi, setEnableRoi] = useState(false);
+    const [alignMode, setAlignMode] = useState<'homography' | 'homography_roi' | 'optical_flow' | 'sam2_object'>('homography');
 
     const actualBatchId = batch?.id || batchId;
 
@@ -50,12 +74,12 @@ export default function AlignmentPanel({ batch, batchId, onAlignmentComplete, ro
         }
     }, [sourceImages]);
 
-    // 切换 enableRoi 关闭时清除 ROI
+    // 切换模式时清除 ROI
     useEffect(() => {
-        if (!enableRoi) {
+        if (alignMode !== 'homography_roi') {
             onClearROI?.();
         }
-    }, [enableRoi]);
+    }, [alignMode]);
 
     const handleAlign = async () => {
         if (!actualBatchId) {
@@ -65,12 +89,22 @@ export default function AlignmentPanel({ batch, batchId, onAlignmentComplete, ro
 
         setLoading(true);
         try {
-            const roiParam = enableRoi && roi ? roi : undefined;
+            const sam2Points = (alignMode === 'sam2_object' && sam2ClickPoint)
+                ? [[sam2ClickPoint.x, sam2ClickPoint.y]]
+                : undefined;
+
             const result = await alignmentService.batchAlign(
                 actualBatchId,
                 overwrite,
-                selectedRefId || undefined,
-                roiParam
+                selectedRefId || undefined, // Pass undefined if null
+                alignMode === 'homography_roi' && roi ? {
+                    x: roi.x,
+                    y: roi.y,
+                    width: roi.width,
+                    height: roi.height
+                } : undefined,
+                alignMode, // Pass alignMode directly as backendMode
+                sam2Points
             );
 
             if (result.new_images && result.new_images.length > 0) {
@@ -136,17 +170,81 @@ export default function AlignmentPanel({ batch, batchId, onAlignmentComplete, ro
                     </Checkbox>
                 </Form.Item>
 
-                <Form.Item style={{ marginBottom: 12 }}>
-                    <Checkbox
-                        checked={enableRoi}
-                        onChange={e => setEnableRoi(e.target.checked)}
-                    >
-                        启用手动绘制 ROI (局部高精度对齐)
-                    </Checkbox>
+                <Form.Item label="对齐模式" style={{ marginBottom: 12 }}>
+                    <Select
+                        value={alignMode}
+                        onChange={setAlignMode}
+                        disabled={loading}
+                        options={[
+                            { label: 'Homography（全局）', value: 'homography' },
+                            { label: 'Homography + ROI（深度选择）', value: 'homography_roi' },
+                            { label: '稠密光流（逐像素）', value: 'optical_flow' },
+                            { label: 'SAM2 物体配准 (Object-Based)', value: 'sam2_object' },
+                        ]}
+                    />
                 </Form.Item>
 
+                {alignMode === 'optical_flow' && (
+                    <Alert
+                        message="稠密光流模式"
+                        description="先用 Homography 粗对齐，再用 Farneback 光流逐像素精细补偿。适合不同深度物体的场景，计算量较大。"
+                        type="info"
+                        showIcon
+                        style={{ marginBottom: 12 }}
+                    />
+                )}
+
+                {alignMode === 'sam2_object' && (
+                    <Form.Item label="SAM2 物体选择" style={{ marginBottom: 16 }}>
+                        <Alert
+                            message="SAM2 物体配准模式"
+                            description="使用 SAM2 自动分割图像中的物体，仅在指定物体区域提取特征进行配准。模型首次使用时会自动下载。"
+                            type="info"
+                            showIcon
+                            style={{ marginBottom: 12 }}
+                        />
+                        {sam2ClickPoint && sam2MaskB64 ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                <Tag color="success" style={{ padding: '4px 8px', fontSize: 13 }}>
+                                    ✓ 已生成参考物体掩码 (点击位置: {sam2ClickPoint.x}, {sam2ClickPoint.y})
+                                </Tag>
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                    <Button
+                                        size="small"
+                                        icon={<AimOutlined />}
+                                        onClick={onStartSam2Click}
+                                        disabled={loading || sam2Loading}
+                                    >
+                                        重新选择物体
+                                    </Button>
+                                    <Button
+                                        size="small"
+                                        danger
+                                        icon={<CloseCircleOutlined />}
+                                        onClick={onCancelSam2Click}
+                                        disabled={loading || sam2Loading}
+                                    >
+                                        取消选择
+                                    </Button>
+                                </div>
+                            </div>
+                        ) : (
+                            <Button
+                                icon={<AimOutlined />}
+                                onClick={onStartSam2Click}
+                                disabled={loading || sam2Loading}
+                                type={sam2ClickMode ? "primary" : "dashed"}
+                                danger={sam2ClickMode} // 用于提示"正在选择"状态
+                                block
+                            >
+                                {sam2Loading ? '⏳ 分割中...' : sam2ClickMode ? '🖱️ 请在左侧主视口点击物体' : '点击选择参考图上的物体'}
+                            </Button>
+                        )}
+                    </Form.Item>
+                )}
+
                 {/* ROI 绘制区 */}
-                {enableRoi && (
+                {alignMode === 'homography_roi' && (
                     <Form.Item label="ROI 选区" style={{ marginBottom: 16 }}>
                         {roi ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -218,9 +316,13 @@ export default function AlignmentPanel({ batch, batchId, onAlignmentComplete, ro
                     icon={<SyncOutlined spin={loading} />}
                     onClick={handleAlign}
                     loading={loading}
-                    disabled={!selectedRefId || (enableRoi && !roi)}
+                    disabled={!selectedRefId || (alignMode === 'homography_roi' && !roi) || (alignMode === 'sam2_object' && !sam2ClickPoint)}
                 >
-                    {enableRoi && !roi ? '请先绘制 ROI' : '执行批量对齐'}
+                    {alignMode === 'homography_roi' && !roi
+                        ? '请先绘制 ROI'
+                        : (alignMode === 'sam2_object' && !sam2ClickPoint)
+                            ? '请先选择 SAM2 配准物体'
+                            : '执行批量对齐'}
                 </Button>
             </Form>
 

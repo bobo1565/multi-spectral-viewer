@@ -5,11 +5,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Layout, Button, message, Tree, Tabs, Popconfirm, Select } from 'antd';
 import { DeleteOutlined, PictureOutlined, FolderOutlined, FileImageOutlined, ImportOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
-import { batchService, imageService } from './services/api';
+import { batchService, imageService, alignmentService } from './services/api';
 import type { BatchInfo, BandType, ImageInfo, BatchImageInfo } from './types';
 import { BAND_TYPES, BAND_LABELS } from './types';
 import { ImageViewer, ToolPanel, BlendPanel, VegetationPanel, AlignmentPanel, BatchImportDialog } from './components';
 import ROICanvas, { type ROICoords } from './components/ROICanvas';
+import SAM2ClickCanvas from './components/SAM2ClickCanvas';
 import './App.css';
 
 const { Header, Content, Sider } = Layout;
@@ -54,14 +55,24 @@ function App() {
     const [roiDrawMode, setRoiDrawMode] = useState(false);
     const [currentRoi, setCurrentRoi] = useState<ROICoords | null>(null);
 
-    // ESC 退出绘制模式
+    // SAM2 交互模式
+    const [sam2ClickMode, setSam2ClickMode] = useState(false);
+    const [sam2ClickPoint, setSam2ClickPoint] = useState<{ x: number, y: number } | null>(null);
+    const [sam2MaskB64, setSam2MaskB64] = useState<string | null>(null);
+    const [sam2Loading, setSam2Loading] = useState(false);
+    const [viewerTransform, setViewerTransform] = useState({ scale: 1, offsetX: 0, offsetY: 0 });
+
+    // ESC 退出绘制或点击模式
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
-            if (e.key === 'Escape' && roiDrawMode) setRoiDrawMode(false);
+            if (e.key === 'Escape') {
+                if (roiDrawMode) setRoiDrawMode(false);
+                if (sam2ClickMode) setSam2ClickMode(false);
+            }
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [roiDrawMode]);
+    }, [roiDrawMode, sam2ClickMode]);
 
     // 图像处理状态
     const [colormap, setColormap] = useState('gray'); // 色带
@@ -567,6 +578,20 @@ function App() {
                 roi={currentRoi}
                 onStartDrawROI={() => setRoiDrawMode(true)}
                 onClearROI={() => { setCurrentRoi(null); setRoiDrawMode(false); }}
+                // SAM2 Props
+                sam2ClickMode={sam2ClickMode}
+                onStartSam2Click={() => setSam2ClickMode(true)}
+                onCancelSam2Click={() => {
+                    setSam2ClickMode(false);
+                    setSam2ClickPoint(null);
+                    setSam2MaskB64(null);
+                }}
+                sam2MaskB64={sam2MaskB64}
+                sam2ClickPoint={sam2ClickPoint}
+                setSam2MaskB64={setSam2MaskB64}
+                setSam2ClickPoint={setSam2ClickPoint}
+                sam2Loading={sam2Loading}
+                setSam2Loading={setSam2Loading}
             />,
         },
         {
@@ -662,7 +687,8 @@ function App() {
                         whiteBalance={whiteBalance}
                         saturation={saturation}
                         onHistogramChange={setHistogram}
-                        onPixelHover={roiDrawMode ? undefined : handlePixelHover}
+                        onPixelHover={(roiDrawMode || sam2ClickMode) ? undefined : handlePixelHover}
+                        onTransformChange={setViewerTransform}
                     />
                     {roiDrawMode && (
                         <ROICanvas
@@ -671,6 +697,33 @@ function App() {
                                 setCurrentRoi(r);
                                 setRoiDrawMode(false);
                             }}
+                        />
+                    )}
+                    {sam2ClickMode && selectedNode?.image && (
+                        <SAM2ClickCanvas
+                            imageWidth={selectedNode.image.width}
+                            imageHeight={selectedNode.image.height}
+                            scale={viewerTransform.scale}
+                            offsetX={viewerTransform.offsetX}
+                            offsetY={viewerTransform.offsetY}
+                            onPointClick={async (x, y) => {
+                                // 点击时调用 API 获取预览掩码
+                                setSam2ClickPoint({ x, y });
+                                setSam2Loading(true);
+                                try {
+                                    const res = await alignmentService.sam2Preview(selectedNode.image!.id, x, y);
+                                    setSam2MaskB64(res.mask_b64);
+                                } catch (e: any) {
+                                    message.error(e.response?.data?.detail || 'SAM2分割失败');
+                                    setSam2MaskB64(null);
+                                    setSam2ClickPoint(null);
+                                } finally {
+                                    setSam2Loading(false);
+                                }
+                            }}
+                            maskBase64={sam2MaskB64}
+                            clickPoint={sam2ClickPoint}
+                            loading={sam2Loading}
                         />
                     )}
                 </Content>

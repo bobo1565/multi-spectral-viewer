@@ -14,11 +14,14 @@ import uuid
 from pathlib import Path
 
 from app.core.feature_matching_algo import (
-    align_images, 
+    align_images,
+    align_images_optical_flow,
+    align_images_with_mask,
     find_valid_region, 
     calculate_common_region, 
     crop_image
 )
+from app.core import sam2_client
 
 # 配置文件路径（模块级常量，供 API 层也能访问）
 ROI_CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'matching.json')
@@ -84,9 +87,16 @@ class ImageAlignerService:
             self._feature_detector = detector_type
 
     def align_batch(self, reference_path: str, target_paths: list, output_dir: str, 
-                           overwrite: bool = True, custom_roi: dict = None) -> dict:
+                           overwrite: bool = True, custom_roi: dict = None,
+                           align_mode: str = 'homography',
+                           sam2_points: list = None) -> dict:
         """
         执行批量对齐，并将结果保存到指定目录
+        
+        align_mode:
+          - 'homography': 全局 Homography（默认）
+          - 'optical_flow': Homography 粗对齐 + Farneback 稠密光流精配
+          - 'sam2_object': SAM2 物体分割驱动的掩码约束配准
         
         ROI 优先级：custom_roi（前端手动绘制） > matching.json（默认配置）
         每次调用都重新加载 matching.json，确保配置热更新生效。
@@ -97,6 +107,7 @@ class ImageAlignerService:
         
         print(f"[AlignService] Starting batch align. Reference: {reference_path}")
         print(f"[AlignService] Targets: {target_paths}, Output: {output_dir}")
+        print(f"[AlignService] Align mode: {align_mode}")
         print(f"[AlignService] Active ROI: {applied_roi} ({'custom' if custom_roi else 'default from matching.json'})")
         
         results = {}
@@ -112,7 +123,28 @@ class ImageAlignerService:
         aligned_images_map = {reference_path: ref_img}
         process_paths = [reference_path]
         
-        # 2. 对齐目标图像
+        # 2. SAM2 模式下，预先分割参考图获取掩码
+        ref_mask = None
+        if align_mode == 'sam2_object':
+            print("[AlignService] SAM2 模式：正在分割参考图...")
+            try:
+                if sam2_points:
+                    # 用户点选模式：使用用户指定的点坐标
+                    print(f"[AlignService] 使用用户点选坐标: {sam2_points}")
+                    ref_masks = sam2_client.segment_image_by_points(reference_path, sam2_points)
+                else:
+                    # 自动模式：全图分割取最大物体
+                    ref_masks = sam2_client.segment_image(reference_path)
+                ref_mask = sam2_client.get_largest_mask(ref_masks, top_n=3)
+                if ref_mask is not None:
+                    print(f"[AlignService] 参考图掩码获取成功，覆盖像素: {ref_mask.sum() // 255}")
+                else:
+                    print("[AlignService] SAM2 未检测到物体，将回退到全图配准")
+            except Exception as e:
+                print(f"[AlignService] SAM2 分割参考图失败: {e}")
+                print("[AlignService] 将回退到全图配准")
+
+        # 3. 对齐目标图像
         for path in target_paths:
             if os.path.abspath(path) == os.path.abspath(reference_path):
                 continue
@@ -123,13 +155,43 @@ class ImageAlignerService:
                     results[path] = (False, f"无法加载目标图: {path}", None)
                     continue
                 
-                aligned = align_images(
-                    ref_img, 
-                    tgt_img, 
-                    roi_config1=applied_roi, 
-                    roi_config2=applied_roi,
-                    feature_detector_type=self._feature_detector
-                )
+                if align_mode == 'sam2_object':
+                    # SAM2 物体配准模式
+                    print(f"[AlignService] SAM2 模式：正在分割目标图 {path}...")
+                    try:
+                        if sam2_points:
+                            # 使用相同的点坐标（多光谱图像场景相同）
+                            tgt_masks = sam2_client.segment_image_by_points(path, sam2_points)
+                        else:
+                            tgt_masks = sam2_client.segment_image(path)
+                        tgt_mask = sam2_client.get_largest_mask(tgt_masks, top_n=3)
+                    except Exception as e:
+                        print(f"[AlignService] SAM2 分割目标图失败: {e}")
+                        tgt_mask = None
+                    
+                    aligned = align_images_with_mask(
+                        ref_img,
+                        tgt_img,
+                        mask1=ref_mask,
+                        mask2=tgt_mask,
+                        feature_detector_type=self._feature_detector
+                    )
+                elif align_mode == 'optical_flow':
+                    aligned = align_images_optical_flow(
+                        ref_img, 
+                        tgt_img, 
+                        roi_config1=applied_roi, 
+                        roi_config2=applied_roi,
+                        feature_detector_type=self._feature_detector
+                    )
+                else:
+                    aligned = align_images(
+                        ref_img, 
+                        tgt_img, 
+                        roi_config1=applied_roi, 
+                        roi_config2=applied_roi,
+                        feature_detector_type=self._feature_detector
+                    )
                 
                 if aligned is not None:
                     aligned_images_map[path] = aligned

@@ -102,16 +102,43 @@ export interface ROIConfig {
 }
 
 export const alignmentService = {
-    async batchAlign(batchId: string, overwrite: boolean = true, referenceImageId?: string, roi?: { x: number, y: number, width: number, height: number }): Promise<any> {
+    async batchAlign(
+        batchId: string,
+        overwrite: boolean = true,
+        referenceImageId?: string,
+        roi?: { x: number, y: number, width: number, height: number },
+        alignMode?: string,
+        sam2Points?: number[][]
+    ): Promise<any> {
         const payload: any = {
             batch_id: batchId,
             overwrite,
-            reference_image_id: referenceImageId
+            reference_image_id: referenceImageId,
+            align_mode: alignMode || 'homography'
         };
         if (roi) {
             payload.roi = roi;
         }
+        if (sam2Points && sam2Points.length > 0) {
+            payload.sam2_points = sam2Points;
+        }
         const response = await api.post('/api/alignment/batch-align', payload);
+        return response.data;
+    },
+
+    async sam2Preview(imageId: string, pointX: number, pointY: number): Promise<{
+        mask_b64: string;
+        area: number;
+        bbox: number[];
+        score: number;
+        point_x: number;
+        point_y: number;
+    }> {
+        const response = await api.post('/api/alignment/sam2-preview', {
+            image_id: imageId,
+            point_x: pointX,
+            point_y: pointY,
+        });
         return response.data;
     },
 

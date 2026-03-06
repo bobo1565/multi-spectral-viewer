@@ -223,3 +223,191 @@ def align_images(img1_color, img2_color, roi_config1=None, roi_config2=None,
 
     aligned_img2 = cv2.warpPerspective(img2_color, H, (w1, h1))
     return aligned_img2
+
+
+# ─────────────────────────────────────────────
+#  稠密光流配准（逐像素级）
+# ─────────────────────────────────────────────
+def align_images_optical_flow(img1_color, img2_color, roi_config1=None, roi_config2=None,
+                               feature_detector_type='SIFT',
+                               ratio_test_thresh=0.70, min_match_count=10,
+                               min_inlier_ratio=0.15, min_inlier_count=50):
+    """
+    两阶段配准：
+      阶段1 — Homography 粗对齐（消除大范围平移/旋转/缩放）
+      阶段2 — Farneback 稠密光流精细补偿（处理因深度差异导致的逐像素局部视差）
+
+    适用于多目相机、视差明显、场景深度不均匀的情况。
+    """
+    if img1_color is None or img2_color is None:
+        return None
+
+    h1, w1 = img1_color.shape[:2]
+
+    # ── 阶段 1：Homography 粗对齐 ──────────────────
+    #    复用现有 align_images，先消除大范围偏移
+    coarse_aligned = align_images(
+        img1_color, img2_color,
+        roi_config1=roi_config1,
+        roi_config2=roi_config2,
+        feature_detector_type=feature_detector_type,
+        ratio_test_thresh=ratio_test_thresh,
+        min_match_count=min_match_count,
+        use_ecc=False,
+        min_inlier_ratio=min_inlier_ratio,
+        min_inlier_count=min_inlier_count
+    )
+
+    if coarse_aligned is None:
+        print("[OpticalFlow] Homography 粗对齐失败，无法继续光流精配")
+        return None
+
+    # ── 阶段 2：Farneback 稠密光流 ──────────────────
+    #    在粗对齐的基础上计算残余位移场
+    ref_gray = preprocess_for_matching(img1_color)
+    aligned_gray = preprocess_for_matching(coarse_aligned)
+
+    print("[OpticalFlow] 计算稠密光流场...")
+    flow = cv2.calcOpticalFlowFarneback(
+        aligned_gray,   # prev (已粗对齐的目标图)
+        ref_gray,        # next (参考图)
+        flow=None,
+        pyr_scale=0.5,   # 金字塔缩放比
+        levels=5,        # 金字塔层数
+        winsize=15,      # 窗口大小
+        iterations=5,    # 每层迭代次数
+        poly_n=7,        # 多项式展开邻域
+        poly_sigma=1.5,  # 高斯标准差
+        flags=0
+    )
+
+    # 构建 remap 坐标网格
+    h, w = coarse_aligned.shape[:2]
+    map_x = np.arange(w, dtype=np.float32)[np.newaxis, :].repeat(h, axis=0)
+    map_y = np.arange(h, dtype=np.float32)[:, np.newaxis].repeat(w, axis=1)
+
+    # 加上光流位移
+    map_x += flow[:, :, 0]
+    map_y += flow[:, :, 1]
+
+    # 应用 remap
+    refined = cv2.remap(coarse_aligned, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+
+    # 计算光流统计信息
+    flow_mag = np.sqrt(flow[:, :, 0] ** 2 + flow[:, :, 1] ** 2)
+    print(f"[OpticalFlow] 光流统计 — 平均位移: {flow_mag.mean():.2f}px, "
+          f"最大位移: {flow_mag.max():.2f}px, "
+          f"中位数: {np.median(flow_mag):.2f}px")
+
+    return refined
+
+
+# ─────────────────────────────────────────────
+#  基于掩码的配准（SAM2 物体分割驱动）
+# ─────────────────────────────────────────────
+def align_images_with_mask(img1_color, img2_color, mask1, mask2,
+                           feature_detector_type='SIFT',
+                           ratio_test_thresh=0.70, min_match_count=10,
+                           use_ecc=False, min_inlier_ratio=0.15, min_inlier_count=50):
+    """
+    基于物体掩码的配准：只在掩码区域提取特征点。
+
+    与 align_images() 的区别：
+    - align_images() 使用矩形 ROI 作为特征提取区域
+    - 本函数使用任意形状的二值掩码（由 SAM2 分割生成）
+
+    参数:
+        mask1, mask2: np.ndarray (H, W), 值为 0 或 255 的二值掩码
+    """
+    if img1_color is None or img2_color is None:
+        return None
+    if mask1 is None or mask2 is None:
+        print("[AlignMask] 掩码为空，回退到全图配准")
+        # 使用全图掩码
+        h1, w1 = img1_color.shape[:2]
+        h2, w2 = img2_color.shape[:2]
+        mask1 = np.ones((h1, w1), dtype=np.uint8) * 255
+        mask2 = np.ones((h2, w2), dtype=np.uint8) * 255
+
+    h1, w1 = img1_color.shape[:2]
+
+    # ── CLAHE 预处理 ──────────────────────────────
+    img1_gray = preprocess_for_matching(img1_color)
+    img2_gray = preprocess_for_matching(img2_color)
+
+    # 确保掩码是 uint8 且大小匹配
+    if mask1.shape[:2] != img1_gray.shape[:2]:
+        mask1 = cv2.resize(mask1, (w1, h1), interpolation=cv2.INTER_NEAREST)
+    if mask2.shape[:2] != img2_gray.shape[:2]:
+        h2, w2 = img2_color.shape[:2]
+        mask2 = cv2.resize(mask2, (w2, h2), interpolation=cv2.INTER_NEAREST)
+
+    mask1 = mask1.astype(np.uint8)
+    mask2 = mask2.astype(np.uint8)
+
+    # 特征检测器初始化
+    detector = None
+    if feature_detector_type == 'SIFT':
+        try:
+            detector = cv2.SIFT_create(nfeatures=0, contrastThreshold=0.03)
+        except Exception:
+            if hasattr(cv2, 'xfeatures2d'):
+                detector = cv2.xfeatures2d.SIFT_create()
+    elif feature_detector_type == 'ORB':
+        detector = cv2.ORB_create(nfeatures=3000)
+
+    if detector is None:
+        print(f"[AlignMask] 无法创建特征检测器: {feature_detector_type}")
+        return None
+
+    # 使用掩码约束特征提取
+    kp1, des1 = detector.detectAndCompute(img1_gray, mask1)
+    kp2, des2 = detector.detectAndCompute(img2_gray, mask2)
+
+    print(f"[AlignMask] 掩码区域特征点: img1={len(kp1) if kp1 else 0}, img2={len(kp2) if kp2 else 0}")
+
+    if des1 is None or des2 is None or len(kp1) < min_match_count or len(kp2) < min_match_count:
+        print(f"[AlignMask] 掩码区域特征点不足")
+        return None
+
+    # 特征匹配
+    norm_type = cv2.NORM_L2 if feature_detector_type == 'SIFT' else cv2.NORM_HAMMING
+    bf = cv2.BFMatcher(norm_type, crossCheck=False)
+    matches = bf.knnMatch(des1, des2, k=2)
+
+    # Lowe 比率测试
+    good_matches = []
+    for m_n in matches:
+        if len(m_n) == 2:
+            m, n = m_n
+            if m.distance < ratio_test_thresh * n.distance:
+                good_matches.append(m)
+
+    if len(good_matches) < min_match_count:
+        print(f"[AlignMask] 掩码区域有效匹配不足: {len(good_matches)}/{min_match_count}")
+        return None
+
+    src_pts = np.array([kp1[m.queryIdx].pt for m in good_matches], dtype=np.float32).reshape(-1, 1, 2)
+    dst_pts = np.array([kp2[m.trainIdx].pt for m in good_matches], dtype=np.float32).reshape(-1, 1, 2)
+
+    # RANSAC 求解 Homography
+    H, mask_homography = cv2.findHomography(dst_pts, src_pts, cv2.RANSAC, 1.0)
+
+    if H is None:
+        print("[AlignMask] 无法计算单应矩阵")
+        return None
+
+    inlier_count = int(mask_homography.sum()) if mask_homography is not None else 0
+    inlier_ratio = inlier_count / len(good_matches) if len(good_matches) > 0 else 0
+    print(f"[AlignMask] 内点数: {inlier_count}/{len(good_matches)}, 内点比例: {inlier_ratio:.2%}")
+
+    if inlier_ratio < min_inlier_ratio and inlier_count < min_inlier_count:
+        print(f"[AlignMask] 配准质量不可靠")
+        return None
+
+    # ECC 精化
+    if use_ecc:
+        H = refine_with_ecc(img1_gray, img2_gray, H)
+
+    aligned_img2 = cv2.warpPerspective(img2_color, H, (w1, h1))
+    return aligned_img2
