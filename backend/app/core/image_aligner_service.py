@@ -138,6 +138,11 @@ class ImageAlignerService:
                 ref_mask = sam2_client.get_largest_mask(ref_masks, top_n=3)
                 if ref_mask is not None:
                     print(f"[AlignService] 参考图掩码获取成功，覆盖像素: {ref_mask.sum() // 255}")
+                    print(f"[AlignService] 参考图尺寸: {ref_img.shape}, 掩码尺寸: {ref_mask.shape}")
+                    # 确保掩码尺寸与图像尺寸匹配
+                    if ref_mask.shape[:2] != ref_img.shape[:2]:
+                        ref_mask = cv2.resize(ref_mask, (ref_img.shape[1], ref_img.shape[0]))
+                        print(f"[Debug] Resized ref_mask to: {ref_mask.shape}")
                 else:
                     print("[AlignService] SAM2 未检测到物体，将回退到全图配准")
             except Exception as e:
@@ -165,15 +170,47 @@ class ImageAlignerService:
                         else:
                             tgt_masks = sam2_client.segment_image(path)
                         tgt_mask = sam2_client.get_largest_mask(tgt_masks, top_n=3)
+                        if tgt_mask is not None:
+                            print(f"[AlignService] 目标图掩码获取成功，覆盖像素: {tgt_mask.sum() // 255}")
+                            print(f"[AlignService] 目标图尺寸: {tgt_img.shape}, 掩码尺寸: {tgt_mask.shape}")
                     except Exception as e:
                         print(f"[AlignService] SAM2 分割目标图失败: {e}")
                         tgt_mask = None
                     
+                    # 确保掩码尺寸与图像尺寸匹配
+                    if ref_mask is not None and ref_mask.shape[:2] != ref_img.shape[:2]:
+                        ref_mask = cv2.resize(ref_mask, (ref_img.shape[1], ref_img.shape[0]))
+                        print(f"[Debug] Resized ref_mask to: {ref_mask.shape}")
+                    
+                    if tgt_mask is not None and tgt_mask.shape[:2] != tgt_img.shape[:2]:
+                        tgt_mask = cv2.resize(tgt_mask, (tgt_img.shape[1], tgt_img.shape[0]))
+                        print(f"[Debug] Resized tgt_mask to: {tgt_mask.shape}")
+                    
+                    # 调试：打印掩码和图像尺寸信息
+                    print(f"[Debug] ref_img: {ref_img.shape}, tgt_img: {tgt_img.shape}")
+                    print(f"[Debug] ref_mask: {ref_mask.shape if ref_mask is not None else None}")
+                    print(f"[Debug] tgt_mask: {tgt_mask.shape if tgt_mask is not None else None}")
+                    
+                    # 如果参考图和目标图尺寸不同，需要调整目标图和掩码
+                    h_ref, w_ref = ref_img.shape[:2]
+                    h_tgt, w_tgt = tgt_img.shape[:2]
+                    
+                    tgt_img_aligned = tgt_img
+                    tgt_mask_aligned = tgt_mask
+                    
+                    if (h_ref, w_ref) != (h_tgt, w_tgt):
+                        print(f"[Debug] 图像尺寸不一致: ref={w_ref}x{h_ref}, tgt={w_tgt}x{h_tgt}")
+                        print(f"[Debug] 调整目标图尺寸...")
+                        tgt_img_aligned = cv2.resize(tgt_img, (w_ref, h_ref))
+                        if tgt_mask_aligned is not None:
+                            tgt_mask_aligned = cv2.resize(tgt_mask, (w_ref, h_ref), interpolation=cv2.INTER_NEAREST)
+                        print(f"[Debug] 调整后 tgt_img: {tgt_img_aligned.shape}, tgt_mask: {tgt_mask_aligned.shape if tgt_mask_aligned is not None else None}")
+                    
                     aligned = align_images_with_mask(
                         ref_img,
-                        tgt_img,
+                        tgt_img_aligned,
                         mask1=ref_mask,
-                        mask2=tgt_mask,
+                        mask2=tgt_mask_aligned,
                         feature_detector_type=self._feature_detector
                     )
                 elif align_mode == 'optical_flow':

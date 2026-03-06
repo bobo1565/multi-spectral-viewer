@@ -18,6 +18,14 @@ interface PixelValue {
     gray?: number;
 }
 
+export interface ViewerLayer {
+    id: string;
+    url: string;
+    opacity?: number;
+    blendMode?: React.CSSProperties['mixBlendMode'];
+    visible?: boolean;
+}
+
 interface Props {
     image: ImageInfo | null;
     blendedUrl?: string | null;
@@ -27,7 +35,15 @@ interface Props {
     saturation?: number;
     onHistogramChange?: (histogram: { r: number[], g: number[], b: number[] }) => void;
     onPixelHover?: (x: number, y: number) => void;
-    onTransformChange?: (transform: { scale: number; offsetX: number; offsetY: number }) => void;
+    onTransformChange?: (transform: {
+        scale: number;
+        offsetX: number;
+        offsetY: number;
+        imageWidth: number;
+        imageHeight: number;
+    }) => void;
+    layers?: ViewerLayer[];
+    children?: React.ReactNode;
 }
 
 export default function ImageViewer({
@@ -40,6 +56,8 @@ export default function ImageViewer({
     onHistogramChange,
     onPixelHover,
     onTransformChange,
+    layers = [],
+    children,
 }: Props) {
     const [scale, setScale] = useState(1);
     const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -49,6 +67,7 @@ export default function ImageViewer({
     const containerRef = useRef<HTMLDivElement>(null);
     const imgRef = useRef<HTMLImageElement>(null);
     const lastMouseRef = useRef({ x: 0, y: 0 });
+    const renderSizeRef = useRef({ width: image?.width || 0, height: image?.height || 0 });
 
     const [processedUrl, setProcessedUrl] = useState<string | null>(null);
     const [pixelValue, setPixelValue] = useState<PixelValue | null>(null);
@@ -59,13 +78,24 @@ export default function ImageViewer({
     const histogramTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // 将视图重置为适应容器
+    const emitTransform = useCallback((nextScale: number, nextOffset: { x: number; y: number }) => {
+        onTransformChange?.({
+            scale: nextScale,
+            offsetX: nextOffset.x,
+            offsetY: nextOffset.y,
+            imageWidth: renderSizeRef.current.width,
+            imageHeight: renderSizeRef.current.height,
+        });
+    }, [onTransformChange]);
+
     const resetView = useCallback(() => {
         if (!containerRef.current || !image) return;
 
         const cw = containerRef.current.clientWidth;
         const ch = containerRef.current.clientHeight;
-        const iw = image.width;
-        const ih = image.height;
+        const iw = renderSizeRef.current.width || image.width;
+        const ih = renderSizeRef.current.height || image.height;
+        if (!iw || !ih) return;
 
         const newScale = Math.min(cw / iw, ch / ih, 1) * 0.9;
         const newOffset = {
@@ -74,14 +104,15 @@ export default function ImageViewer({
         };
         setScale(newScale);
         setOffset(newOffset);
-        onTransformChange?.({ scale: newScale, offsetX: newOffset.x, offsetY: newOffset.y });
-    }, [image, onTransformChange]);
+        emitTransform(newScale, newOffset);
+    }, [image, emitTransform]);
 
     // 加载图片
     useEffect(() => {
         setPixelValue(null);
         imageDataRef.current = null;
         originalImageDataRef.current = null;
+        renderSizeRef.current = { width: image?.width || 0, height: image?.height || 0 };
 
         if (blendedUrl) {
             setProcessedUrl(blendedUrl);
@@ -99,12 +130,12 @@ export default function ImageViewer({
 
     // 图片加载完成且尺寸就绪后，重置视图
     useEffect(() => {
-        if (processedUrl && image) {
+        if (processedUrl && (image || blendedUrl)) {
             // 延迟一下确保 DOM 已渲染且尺寸可用
             const timer = setTimeout(resetView, 100);
             return () => clearTimeout(timer);
         }
-    }, [processedUrl, image?.id, resetView]);
+    }, [processedUrl, image?.id, blendedUrl, resetView]);
 
     // 处理图片：当参数变化时重新处理
     useEffect(() => {
@@ -123,7 +154,7 @@ export default function ImageViewer({
 
             setOffset((prev: { x: number; y: number }) => {
                 const newOffset = { x: prev.x + dx, y: prev.y + dy };
-                onTransformChange?.({ scale, offsetX: newOffset.x, offsetY: newOffset.y });
+                emitTransform(scale, newOffset);
                 return newOffset;
             });
             lastMouseRef.current = { x: e.clientX, y: e.clientY };
@@ -142,7 +173,7 @@ export default function ImageViewer({
             window.removeEventListener('mousemove', handleGlobalMouseMove);
             window.removeEventListener('mouseup', handleGlobalMouseUp);
         };
-    }, [isDragging]);
+    }, [isDragging, scale, emitTransform]);
 
     const handleMouseDown = (e: React.MouseEvent) => {
         if (e.button !== 0) return; // 仅左键拖拽
@@ -173,7 +204,7 @@ export default function ImageViewer({
 
         setScale(newScale);
         setOffset({ x: ox, y: oy });
-        onTransformChange?.({ scale: newScale, offsetX: ox, offsetY: oy });
+        emitTransform(newScale, { x: ox, y: oy });
     };
 
     const loadImageUrl = async (url: string) => {
@@ -197,6 +228,7 @@ export default function ImageViewer({
 
             // 保存当前显示的数据用于像素拾取
             imageDataRef.current = imageData;
+            renderSizeRef.current = { width: imageData.width, height: imageData.height };
 
             // 保存原始数据
             originalImageDataRef.current = new ImageData(
@@ -342,7 +374,7 @@ export default function ImageViewer({
         };
         setOffset(newOffset);
         setScale(newScale);
-        onTransformChange?.({ scale: newScale, offsetX: newOffset.x, offsetY: newOffset.y });
+        emitTransform(newScale, newOffset);
     };
 
     const handleZoomOut = () => {
@@ -359,7 +391,7 @@ export default function ImageViewer({
         };
         setOffset(newOffset);
         setScale(newScale);
-        onTransformChange?.({ scale: newScale, offsetX: newOffset.x, offsetY: newOffset.y });
+        emitTransform(newScale, newOffset);
     };
 
     const handleReset = () => resetView();
@@ -370,17 +402,19 @@ export default function ImageViewer({
         const rect = containerRef.current.getBoundingClientRect();
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
+        const displayWidth = renderSizeRef.current.width || image.width;
+        const displayHeight = renderSizeRef.current.height || image.height;
 
         // 计算实际像素坐标：(mx - offset.x) / scale
         const x = Math.floor((mx - offset.x) / scale);
         const y = Math.floor((my - offset.y) / scale);
 
-        if (x >= 0 && x < image.width && y >= 0 && y < image.height) {
+        if (x >= 0 && x < displayWidth && y >= 0 && y < displayHeight) {
             onPixelHover?.(x, y);
 
             // 读取像素值
             if (imageDataRef.current) {
-                const idx = (y * image.width + x) * 4;
+                const idx = (y * displayWidth + x) * 4;
                 const data = imageDataRef.current.data;
                 const originData = originalImageDataRef.current?.data;
 
@@ -462,18 +496,41 @@ export default function ImageViewer({
             >
                 {loading && <Spin className="loading-spin" />}
                 {processedUrl && (
-                    <img
-                        ref={imgRef}
-                        src={processedUrl}
-                        alt={displayTitle}
+                    <div
+                        className="viewer-stage"
                         style={{
+                            width: renderSizeRef.current.width,
+                            height: renderSizeRef.current.height,
                             transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
                             transition: isDragging ? 'none' : 'transform 0.1s ease'
                         }}
-                        onLoad={() => setLoading(false)}
-                        draggable={false}
-                    />
+                    >
+                        <img
+                            ref={imgRef}
+                            src={processedUrl}
+                            alt={displayTitle}
+                            className="viewer-layer viewer-base-layer"
+                            onLoad={() => setLoading(false)}
+                            draggable={false}
+                        />
+                        {layers
+                            .filter(layer => layer.visible !== false)
+                            .map(layer => (
+                                <img
+                                    key={layer.id}
+                                    src={layer.url}
+                                    alt={layer.id}
+                                    className="viewer-layer viewer-overlay-layer"
+                                    style={{
+                                        opacity: layer.opacity ?? 1,
+                                        mixBlendMode: layer.blendMode ?? 'normal'
+                                    }}
+                                    draggable={false}
+                                />
+                            ))}
+                    </div>
                 )}
+                {children}
             </div>
 
             {/* 像素状态栏 */}

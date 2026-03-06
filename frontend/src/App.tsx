@@ -60,7 +60,13 @@ function App() {
     const [sam2ClickPoint, setSam2ClickPoint] = useState<{ x: number, y: number } | null>(null);
     const [sam2MaskB64, setSam2MaskB64] = useState<string | null>(null);
     const [sam2Loading, setSam2Loading] = useState(false);
-    const [viewerTransform, setViewerTransform] = useState({ scale: 1, offsetX: 0, offsetY: 0 });
+    const [viewerTransform, setViewerTransform] = useState({
+        scale: 1,
+        offsetX: 0,
+        offsetY: 0,
+        imageWidth: 0,
+        imageHeight: 0,
+    });
 
     // ESC 退出绘制或点击模式
     useEffect(() => {
@@ -682,6 +688,12 @@ function App() {
                     <ImageViewer
                         image={selectedNode?.image || null}
                         blendedUrl={blendedImageUrl}
+                        layers={sam2MaskB64 ? [{
+                            id: 'sam2-mask',
+                            url: `data:image/png;base64,${sam2MaskB64}`,
+                            opacity: 0.5,
+                            blendMode: 'screen'
+                        }] : []}
                         channel={selectedNode?.channel || 'rgb'}
                         colormap={colormap}
                         whiteBalance={whiteBalance}
@@ -689,43 +701,53 @@ function App() {
                         onHistogramChange={setHistogram}
                         onPixelHover={(roiDrawMode || sam2ClickMode) ? undefined : handlePixelHover}
                         onTransformChange={setViewerTransform}
-                    />
-                    {roiDrawMode && (
-                        <ROICanvas
-                            roi={currentRoi}
-                            onROIDraw={(r) => {
-                                setCurrentRoi(r);
-                                setRoiDrawMode(false);
-                            }}
-                        />
-                    )}
-                    {sam2ClickMode && selectedNode?.image && (
-                        <SAM2ClickCanvas
-                            imageWidth={selectedNode.image.width}
-                            imageHeight={selectedNode.image.height}
-                            scale={viewerTransform.scale}
-                            offsetX={viewerTransform.offsetX}
-                            offsetY={viewerTransform.offsetY}
-                            onPointClick={async (x, y) => {
-                                // 点击时调用 API 获取预览掩码
-                                setSam2ClickPoint({ x, y });
-                                setSam2Loading(true);
-                                try {
-                                    const res = await alignmentService.sam2Preview(selectedNode.image!.id, x, y);
-                                    setSam2MaskB64(res.mask_b64);
-                                } catch (e: any) {
-                                    message.error(e.response?.data?.detail || 'SAM2分割失败');
-                                    setSam2MaskB64(null);
-                                    setSam2ClickPoint(null);
-                                } finally {
-                                    setSam2Loading(false);
-                                }
-                            }}
-                            maskBase64={sam2MaskB64}
-                            clickPoint={sam2ClickPoint}
-                            loading={sam2Loading}
-                        />
-                    )}
+                    >
+                        {roiDrawMode && (
+                            <ROICanvas
+                                roi={currentRoi}
+                                onROIDraw={(r) => {
+                                    setCurrentRoi(r);
+                                    setRoiDrawMode(false);
+                                }}
+                            />
+                        )}
+                        {(sam2ClickMode || sam2MaskB64) && selectedNode?.image && (
+                            <SAM2ClickCanvas
+                                imageWidth={selectedNode.image.width}
+                                imageHeight={selectedNode.image.height}
+                                displayWidth={viewerTransform.imageWidth || selectedNode.image.width}
+                                displayHeight={viewerTransform.imageHeight || selectedNode.image.height}
+                                scale={viewerTransform.scale}
+                                offsetX={viewerTransform.offsetX}
+                                offsetY={viewerTransform.offsetY}
+                                clickEnabled={sam2ClickMode}
+                                onPointClick={async (x, y) => {
+                                    setSam2ClickPoint({ x, y });
+                                    setSam2Loading(true);
+                                    try {
+                                        const displayWidth = viewerTransform.imageWidth || selectedNode.image!.width;
+                                        const displayHeight = viewerTransform.imageHeight || selectedNode.image!.height;
+                                        const mappedX = Math.max(0, Math.min(displayWidth - 1, Math.round(x)));
+                                        const mappedY = Math.max(0, Math.min(displayHeight - 1, Math.round(y)));
+                                        const res = await alignmentService.sam2Preview(
+                                            selectedNode.image!.id,
+                                            mappedX,
+                                            mappedY
+                                        );
+                                        setSam2MaskB64(res.mask_b64);
+                                    } catch (e: any) {
+                                        message.error(e.response?.data?.detail || 'SAM2分割失败');
+                                        setSam2MaskB64(null);
+                                        setSam2ClickPoint(null);
+                                    } finally {
+                                        setSam2Loading(false);
+                                    }
+                                }}
+                                clickPoint={sam2ClickPoint}
+                                loading={sam2Loading}
+                            />
+                        )}
+                    </ImageViewer>
                 </Content>
 
                 <div

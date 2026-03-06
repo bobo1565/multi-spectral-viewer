@@ -9,6 +9,7 @@ import base64
 import traceback
 import numpy as np
 import cv2
+from PIL import Image, ImageOps
 from pathlib import Path
 from typing import List, Optional
 
@@ -66,11 +67,14 @@ class SegmentResponse(BaseModel):
 # ── 辅助函数 ──────────────────────────────────
 def _read_image_from_upload(file_bytes: bytes) -> np.ndarray:
     """从上传的文件字节读取图像"""
-    nparr = np.frombuffer(file_bytes, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if img is None:
+    pil_img = Image.open(io.BytesIO(file_bytes))
+    pil_img = ImageOps.exif_transpose(pil_img)
+    if pil_img.mode != "RGB":
+        pil_img = pil_img.convert("RGB")
+    rgb = np.array(pil_img)
+    if rgb.size == 0:
         raise ValueError("无法解码图像")
-    return img
+    return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
 
 def _mask_to_b64(mask: np.ndarray) -> str:
@@ -200,6 +204,8 @@ async def segment_by_points(
 
         points = [[x, y] for x, y in zip(px, py)]
         labels = [1] * len(points)
+
+        print(f"[SAM2] 接收到的点坐标：{points}, 图像尺寸：{img_w}x{img_h}")
 
         model = get_sam_model()
         results = model(img, points=points, labels=labels, verbose=False)

@@ -2,10 +2,7 @@
 
 .sam2-overlay {
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    inset: 0;
     z-index: 20;
     cursor: crosshair;
 }
@@ -18,14 +15,13 @@
 /* 掩码覆盖层：半透明绿色 */
 .sam2-mask-layer {
     position: absolute;
-    top: 0;
-    left: 0;
     transform-origin: 0 0;
     pointer-events: none;
     /* 绿色通道混合：白色掩码区域显示为半透明绿色 */
     mix-blend-mode: screen;
     opacity: 0.5;
     filter: sepia(1) saturate(5) hue-rotate(80deg);
+    image-rendering: crisp-edges;
 }
 
 /* 点击标记 */

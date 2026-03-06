@@ -91,6 +91,8 @@ async def sam2_preview(request: SAM2PreviewRequest, db: Session = Depends(get_db
     
     # 调用 SAM2 点提示分割
     try:
+        print(f"[SAM2Preview] 接收到的坐标：point_x={request.point_x}, point_y={request.point_y}")
+        print(f"[SAM2Preview] 图像信息：{image.width}x{image.height}, 路径：{image_path}")
         masks = sam2_client.segment_image_by_points(
             image_path, 
             [[request.point_x, request.point_y]]
@@ -103,6 +105,8 @@ async def sam2_preview(request: SAM2PreviewRequest, db: Session = Depends(get_db
     
     # 返回最大面积的掩码
     best_mask = max(masks, key=lambda m: m["area"])
+    
+    print(f"[SAM2Preview] 返回掩码信息：area={best_mask['area']}, bbox={best_mask['bbox']}, score={best_mask['score']}")
     
     return SAM2PreviewResponse(
         mask_b64=best_mask["mask_b64"],

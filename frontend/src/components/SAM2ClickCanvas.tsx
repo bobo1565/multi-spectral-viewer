@@ -10,35 +10,40 @@ interface Props {
     imageWidth: number;
     /** 图像原始高度（像素） */
     imageHeight: number;
+    displayWidth?: number;
+    displayHeight?: number;
     /** 图像变换参数（来自 ImageViewer） */
     scale: number;
     offsetX: number;
     offsetY: number;
     /** 用户点击回调，返回图像像素坐标 */
     onPointClick: (x: number, y: number) => void;
-    /** 掩码 base64 预览（PNG 格式） */
-    maskBase64?: string | null;
     /** 当前标记点 */
     clickPoint?: { x: number; y: number } | null;
     /** 是否正在加载 */
     loading?: boolean;
+    clickEnabled?: boolean;
 }
 
 export default function SAM2ClickCanvas({
     imageWidth,
     imageHeight,
+    displayWidth,
+    displayHeight,
     scale,
     offsetX,
     offsetY,
     onPointClick,
-    maskBase64,
     clickPoint,
     loading = false,
+    clickEnabled = true,
 }: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
+    const viewWidth = displayWidth || imageWidth;
+    const viewHeight = displayHeight || imageHeight;
 
     const handleClick = useCallback((e: React.MouseEvent) => {
-        if (!containerRef.current || loading) return;
+        if (!containerRef.current || loading || !clickEnabled) return;
         e.stopPropagation();
         e.preventDefault();
 
@@ -50,11 +55,15 @@ export default function SAM2ClickCanvas({
         const imgX = Math.floor((mx - offsetX) / scale);
         const imgY = Math.floor((my - offsetY) / scale);
 
+        console.log(`[SAM2Click] 鼠标点击：屏幕=(${mx.toFixed(1)}, ${my.toFixed(1)}), 显示图像=(${imgX}, ${imgY}), scale=${scale}, offset=(${offsetX}, ${offsetY}), display=${viewWidth}x${viewHeight}, target=${imageWidth}x${imageHeight}`);
+
         // 确保在图像范围内
-        if (imgX >= 0 && imgX < imageWidth && imgY >= 0 && imgY < imageHeight) {
+        if (imgX >= 0 && imgX < viewWidth && imgY >= 0 && imgY < viewHeight) {
             onPointClick(imgX, imgY);
+        } else {
+            console.warn(`[SAM2Click] 点击超出范围：(${imgX}, ${imgY}), 显示尺寸：${viewWidth}x${viewHeight}`);
         }
-    }, [imageWidth, imageHeight, scale, offsetX, offsetY, onPointClick, loading]);
+    }, [imageWidth, imageHeight, viewWidth, viewHeight, scale, offsetX, offsetY, onPointClick, loading, clickEnabled]);
 
     return (
         <div
@@ -62,21 +71,6 @@ export default function SAM2ClickCanvas({
             className={`sam2-overlay ${loading ? 'sam2-loading' : ''}`}
             onClick={handleClick}
         >
-            {/* 掩码半透明覆盖 */}
-            {maskBase64 && (
-                <img
-                    className="sam2-mask-layer"
-                    src={`data:image/png;base64,${maskBase64}`}
-                    alt="SAM2 mask"
-                    style={{
-                        transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`,
-                        width: imageWidth,
-                        height: imageHeight,
-                    }}
-                    draggable={false}
-                />
-            )}
-
             {/* 点击标记 */}
             {clickPoint && (
                 <div
