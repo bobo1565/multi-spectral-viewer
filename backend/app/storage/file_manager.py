@@ -15,7 +15,7 @@ class FileManager:
     
     def __init__(self, upload_dir: str = None):
         if upload_dir is None:
-            PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+            import os; PROJECT_ROOT = Path("/app") if os.getenv("ENV") == "production" else Path(__file__).parent.parent.parent.parent
             upload_dir = str(PROJECT_ROOT / "uploads")
         self.upload_dir = Path(upload_dir)
         self.upload_dir.mkdir(parents=True, exist_ok=True)

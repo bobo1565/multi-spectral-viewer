@@ -39,6 +39,7 @@ export default function ROICanvas({ roi, onROIDraw }: Props) {
 
     const handleMouseDown = (e: React.MouseEvent) => {
         e.preventDefault();
+        e.stopPropagation();
         const rel = toRel(e.clientX, e.clientY);
         setIsDrawing(true);
         setStartPos(rel);
@@ -46,6 +47,7 @@ export default function ROICanvas({ roi, onROIDraw }: Props) {
     };
 
     const handleMouseMove = (e: React.MouseEvent) => {
+        e.stopPropagation();
         if (!isDrawing) return;
         const rel = toRel(e.clientX, e.clientY);
         setLiveRect({
@@ -56,7 +58,8 @@ export default function ROICanvas({ roi, onROIDraw }: Props) {
         });
     };
 
-    const handleMouseUp = (_e: React.MouseEvent) => {
+    const handleMouseUp = (e: React.MouseEvent) => {
+        e.stopPropagation();
         if (!isDrawing) return;
         setIsDrawing(false);
         if (liveRect && liveRect.width > 0.005 && liveRect.height > 0.005) {

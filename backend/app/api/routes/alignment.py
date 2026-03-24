@@ -9,7 +9,7 @@ from pathlib import Path
 
 from app.core import sam2_client
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
+import os; PROJECT_ROOT = Path("/app") if os.getenv("ENV") == "production" else Path(__file__).parent.parent.parent.parent.parent
 UPLOAD_DIR = str(PROJECT_ROOT / "uploads")
 
 from app.core.image_aligner_service import ImageAlignerService, load_roi_config, save_roi_config

@@ -7,7 +7,7 @@ from typing import List, Optional
 import os
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
+import os; PROJECT_ROOT = Path("/app") if os.getenv("ENV") == "production" else Path(__file__).parent.parent.parent.parent.parent
 UPLOAD_DIR = str(PROJECT_ROOT / "uploads")
 
 from app.api.models import BatchCreate, BatchInfo, BatchImageInfo, BAND_TYPES

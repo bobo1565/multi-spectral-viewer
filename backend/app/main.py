@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 # 获取项目根目录
-PROJECT_ROOT = Path(__file__).parent.parent.parent
+import os; PROJECT_ROOT = Path("/app") if os.getenv("ENV") == "production" else Path(__file__).parent.parent.parent
 UPLOAD_DIR = str(PROJECT_ROOT / "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 

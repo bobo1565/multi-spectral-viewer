@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 import os
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent
+import os; PROJECT_ROOT = Path("/app") if os.getenv("ENV") == "production" else Path(__file__).parent.parent.parent
 DATA_DIR = str(PROJECT_ROOT / "uploads" / "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
