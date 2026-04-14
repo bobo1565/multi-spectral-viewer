@@ -21,6 +21,7 @@ const COLORMAP_OPTIONS = [
     { label: 'Viridis', value: 'Viridis' },
     { label: 'Plasma', value: 'Plasma' },
     { label: 'Turbo', value: 'Turbo' },
+    { label: 'Gray (灰度)', value: 'Gray' },
 ];
 
 export default function VegetationPanel({ images, onBlendedImageUrlChange }: Props) {

@@ -169,18 +169,21 @@ async def batch_align(request: AlignmentBatchRequest, db: Session = Depends(get_
     batch_dir = upload_root / batch_id
     source_dir = batch_dir / "source"
     
-    # 确定输出目录 (Versioning)
-    # 如果 aligned 存在，则尝试 aligned_1, aligned_2 ...
-    base_aligned_name = "aligned"
-    aligned_dir_name = base_aligned_name
-    counter = 1
-    
-    while (batch_dir / aligned_dir_name).exists():
-        aligned_dir_name = f"{base_aligned_name}_{counter}"
-        counter += 1
-        
+    # 清理之前生成的对齐图像记录和文件
+    all_images = BatchDBService.get_all_batch_images_list(db, batch_id)
+    for img in all_images:
+        img_type = getattr(img, 'image_type', None) or ('aligned' if '/aligned' in str(img.filepath) else 'source')
+        if img_type == 'aligned':
+            ImageDBService.delete_image(db, img.id)
+
+    # 确定输出目录并清理遗留目录
+    aligned_dir_name = "aligned"
     aligned_dir = batch_dir / aligned_dir_name
     
+    for p in batch_dir.glob("aligned*"):
+        if p.is_dir():
+            shutil.rmtree(p)
+
     # 确保目录存在
     source_dir.mkdir(parents=True, exist_ok=True)
     aligned_dir.mkdir(parents=True, exist_ok=True)

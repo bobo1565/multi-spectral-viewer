@@ -52,6 +52,7 @@ class VegetationIndexCalculator:
         'Plasma': cv2.COLORMAP_PLASMA,
         'Inferno': cv2.COLORMAP_INFERNO,
         'Turbo': cv2.COLORMAP_TURBO,
+        'Gray': None,  # 灰度图特殊处理
     }
     
     def __init__(self):
@@ -224,7 +225,10 @@ class VegetationIndexCalculator:
         normalized = ((self._result + 1) / 2 * 255).astype(np.uint8)
         
         # 应用色带
-        self._result_colorized = cv2.applyColorMap(normalized, self._colormap)
+        if self._colormap is None:
+            self._result_colorized = cv2.cvtColor(normalized, cv2.COLOR_GRAY2BGR)
+        else:
+            self._result_colorized = cv2.applyColorMap(normalized, self._colormap)
     
     def get_result(self) -> np.ndarray:
         """获取原始结果（-1 到 1）"""
