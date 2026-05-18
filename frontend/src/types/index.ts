@@ -108,3 +108,75 @@ export interface BatchInfo {
     aligned_images?: Record<BandType, BatchImageInfo | null>;
 }
 
+
+// 摄像头相关
+export interface CameraInfo {
+    id: string;
+    name: string;
+    ip?: string | null;
+    stream_url: string;
+    username?: string | null;
+    camera_type?: string | null;
+    band_type?: BandType | null;
+    added_at: string;
+    is_running?: boolean;
+    is_connected?: boolean;
+    fps?: number;
+}
+
+export interface CameraCreatePayload {
+    name?: string;
+    stream_url: string;
+    username?: string;
+    password?: string;
+    camera_type?: string;
+    band_type?: BandType | null;
+}
+
+export interface CameraScanStatus {
+    is_scanning: boolean;
+    progress: number;
+    total: number;
+    found: number;
+    message: string;
+    last_result: any[];
+    scan_logs: string[];
+}
+
+export interface StreamStatus {
+    camera_id: string;
+    name: string;
+    is_running: boolean;
+    is_connected: boolean;
+    fps: number;
+    error_count: number;
+    frame_age: number;
+    rtsp_url: string;
+    band_type?: BandType | null;
+}
+
+export interface CaptureBatchRequest {
+    camera_ids: string[];
+    batch_name?: string;
+    image_type?: 'source' | 'aligned';
+    band_overrides?: Record<string, BandType>;
+    jpeg_quality?: number;
+}
+
+export interface CaptureImageResult {
+    camera_id: string;
+    image_id: string;
+    band_type: string;
+    filename: string;
+    success: boolean;
+    message?: string;
+}
+
+export interface CaptureBatchResponse {
+    batch_id: string;
+    batch_name: string;
+    results: CaptureImageResult[];
+    succeeded: number;
+    failed: number;
+}
+

@@ -2,16 +2,18 @@
  * 多光谱图像分析系统 - 主应用
  */
 import React, { useState, useEffect, useMemo } from 'react';
-import { Layout, Button, message, Tree, Tabs, Popconfirm, Select } from 'antd';
-import { DeleteOutlined, PictureOutlined, FolderOutlined, FileImageOutlined, ImportOutlined } from '@ant-design/icons';
+import { Layout, Button, message, Tree, Tabs, Popconfirm, Select, Segmented } from 'antd';
+import { DeleteOutlined, PictureOutlined, FolderOutlined, FileImageOutlined, ImportOutlined, VideoCameraOutlined, SettingOutlined, PieChartOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import { batchService, imageService, alignmentService } from './services/api';
 import type { BatchInfo, BandType, ImageInfo, BatchImageInfo } from './types';
 import { BAND_TYPES, BAND_LABELS } from './types';
-import { ImageViewer, ToolPanel, BlendPanel, VegetationPanel, AlignmentPanel, BatchImportDialog } from './components';
+import { ImageViewer, ToolPanel, BlendPanel, VegetationPanel, AlignmentPanel, BatchImportDialog, LivePanel, CameraManager } from './components';
 import ROICanvas, { type ROICoords } from './components/ROICanvas';
 import SAM2ClickCanvas from './components/SAM2ClickCanvas';
 import './App.css';
+
+type AppView = 'analysis' | 'live' | 'cameras';
 
 const { Header, Content, Sider } = Layout;
 
@@ -41,6 +43,7 @@ function _adaptBatchImage(img: any): ImageInfo {
 }
 
 function App() {
+    const [view, setView] = useState<AppView>('analysis');
     const [batches, setBatches] = useState<BatchInfo[]>([]);
     const [images, setImages] = useState<ImageInfo[]>([]); // 保留用于兼容其他面板
     const [selectedNode, setSelectedNode] = useState<SelectedNode | null>(null);
@@ -627,6 +630,30 @@ function App() {
         }, 0);
     }, [batches]);
 
+    // 抓拍成功后：刷新批次列表并跳转到分析视图、选中新批次
+    const handleCaptureSuccess = async (newBatchId: string) => {
+        const data = await batchService.listBatches();
+        setBatches(data);
+        const newBatch = data.find(b => b.id === newBatchId);
+        if (newBatch) {
+            const sourceImgs = newBatch.source_images || newBatch.images || ({} as Record<string, BatchImageInfo | null>);
+            // 优先选 rgb, 没有则选第一个可用波段
+            const firstBand = (['rgb', ...BAND_TYPES.filter(b => b !== 'rgb')] as BandType[])
+                .find(b => sourceImgs[b]);
+            if (firstBand && sourceImgs[firstBand]) {
+                setSelectedNode({
+                    batchId: newBatch.id,
+                    bandType: firstBand,
+                    channel: 'rgb',
+                    image: _adaptBatchImage(sourceImgs[firstBand]),
+                    imageType: 'source',
+                });
+            }
+            setExpandedKeys(prev => Array.from(new Set([...prev, newBatch.id, `${newBatch.id}-source`])));
+        }
+        setView('analysis');
+    };
+
     return (
         <Layout className="app-layout">
             <Header className="app-header">
@@ -634,11 +661,32 @@ function App() {
                     <PictureOutlined />
                     <span>多光谱图像分析系统</span>
                 </div>
+                <Segmented
+                    value={view}
+                    onChange={(v) => setView(v as AppView)}
+                    options={[
+                        { label: '分析', value: 'analysis', icon: <PieChartOutlined /> },
+                        { label: '实时监控', value: 'live', icon: <VideoCameraOutlined /> },
+                        { label: '摄像头管理', value: 'cameras', icon: <SettingOutlined /> },
+                    ]}
+                />
                 <div className="header-info">
                     <span>{batches.length} 个批次 / {totalImages} 张图像</span>
                 </div>
             </Header>
 
+            {view === 'live' && (
+                <LivePanel
+                    onCaptureSuccess={handleCaptureSuccess}
+                    onGoCameraManager={() => setView('cameras')}
+                />
+            )}
+
+            {view === 'cameras' && (
+                <CameraManager onBack={() => setView('live')} />
+            )}
+
+            {view === 'analysis' && (
             <Layout className="main-layout">
                 {/* 左侧批次树 */}
                 <Sider width={leftWidth} className="image-sider">
@@ -765,6 +813,7 @@ function App() {
                     />
                 </Sider>
             </Layout>
+            )}
 
             {/* 批次导入对话框 */}
             <BatchImportDialog

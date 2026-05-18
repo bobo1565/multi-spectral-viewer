@@ -1,0 +1,86 @@
+.camera-manager {
+    padding: 16px 24px;
+    min-height: calc(100vh - 64px);
+    height: auto;
+    overflow-y: auto;
+    background: #f5f5f5;
+}
+
+.camera-manager-section {
+    background: #fff;
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    padding: 16px 20px;
+    margin-bottom: 16px;
+}
+
+.camera-manager-section h3 {
+    margin: 0 0 12px 0;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.scan-progress-line {
+    margin: 12px 0 0;
+}
+
+.scan-status-summary {
+    margin-top: 8px;
+    color: #666;
+    font-size: 12px;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.camera-manager-toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.scan-log-panel {
+    max-height: 320px;
+    overflow-y: auto;
+    background: #0f172a;
+    border-radius: 6px;
+    padding: 12px;
+    font-family: Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+.scan-log-empty {
+    color: #94a3b8;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.scan-log-line {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    color: #e2e8f0;
+    font-size: 12px;
+    line-height: 1.6;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.scan-log-line:last-child {
+    border-bottom: none;
+}
+
+.scan-log-index {
+    color: #38bdf8;
+    min-width: 24px;
+    text-align: right;
+    flex: 0 0 auto;
+}
+
+.scan-log-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+}

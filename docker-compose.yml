@@ -6,12 +6,16 @@ services:
       - "8000:8000"
     volumes:
       - ./uploads:/app/uploads
+      # 可选：挂载旧版 cameras_db.json 供首次启动迁移到 SQLite（迁移后会重命名为 .migrated）
+      # - ./cameras_db.json:/app/cameras_db.json:ro
     environment:
       - ENV=production
       - SAM2_SERVICE_URL=http://sam2:8001
     depends_on:
       - sam2
     restart: unless-stopped
+    # Linux 上若需 ONVIF 多播发现，可改用 host 网络（此时需自行用宿主机 IP 访问 SAM2，并去掉 depends_on 的端口映射语义）
+    # network_mode: host
 
   frontend:
     build: ./frontend

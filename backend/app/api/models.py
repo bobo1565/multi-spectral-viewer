@@ -142,3 +142,107 @@ class BatchInfo(BaseModel):
     source_images: Dict[str, Optional[BatchImageInfo]] = {}
     aligned_images: Dict[str, Optional[BatchImageInfo]] = {}
 
+
+# ---------- 摄像头相关模型 ----------
+
+BandTypeLiteral = Literal["rgb", "570nm", "650nm", "730nm", "850nm"]
+
+
+class CameraInfo(BaseModel):
+    id: str
+    name: str
+    ip: Optional[str] = None
+    stream_url: str
+    username: Optional[str] = None
+    camera_type: Optional[str] = None
+    band_type: Optional[str] = None
+    added_at: datetime
+    is_running: bool = False      # 流是否在后台运行
+    is_connected: bool = False    # 是否能拿到帧
+    fps: int = 0
+
+
+class CameraCreate(BaseModel):
+    name: Optional[str] = None
+    stream_url: str
+    username: Optional[str] = None
+    password: Optional[str] = None
+    camera_type: Optional[str] = None
+    band_type: Optional[str] = None
+
+
+class CameraUpdate(BaseModel):
+    name: Optional[str] = None
+    stream_url: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    band_type: Optional[str] = None
+
+
+class CameraBandUpdate(BaseModel):
+    band_type: Optional[str] = None  # None / "" 表示解绑
+
+
+class CameraScanStatus(BaseModel):
+    is_scanning: bool
+    progress: int = 0
+    total: int = 0
+    found: int = 0
+    message: str = ""
+    last_result: List[Dict] = Field(default_factory=list)
+    scan_logs: List[str] = Field(default_factory=list)
+
+
+class CameraSyncRequest(BaseModel):
+    """用当前扫描结果替换已保存摄像头列表"""
+    pass
+
+
+class StreamsStatusRequest(BaseModel):
+    active_ids: List[str] = Field(default_factory=list)
+    main_id: Optional[str] = None
+
+
+class StreamStatus(BaseModel):
+    camera_id: str
+    name: str
+    is_running: bool
+    is_connected: bool
+    fps: int = 0
+    error_count: int = 0
+    frame_age: float = -1
+    rtsp_url: str = ""
+    band_type: Optional[str] = None
+
+
+# ---------- 抓拍建批次 ----------
+
+class CaptureBatchRequest(BaseModel):
+    camera_ids: List[str]
+    batch_name: Optional[str] = None
+    image_type: Literal["source", "aligned"] = "source"
+    # 若相机未绑定波段，可在此处为对应相机指定覆盖值
+    band_overrides: Dict[str, str] = Field(default_factory=dict)
+    jpeg_quality: int = 95
+
+
+class AddFromScanRequest(BaseModel):
+    """从最近一次扫描结果中添加一台（按 id 或 ip 匹配）"""
+    match: str
+
+
+class CaptureImageResult(BaseModel):
+    camera_id: str
+    image_id: str
+    band_type: str
+    filename: str
+    success: bool
+    message: Optional[str] = None
+
+
+class CaptureBatchResponse(BaseModel):
+    batch_id: str
+    batch_name: str
+    results: List[CaptureImageResult]
+    succeeded: int
+    failed: int

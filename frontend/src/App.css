@@ -8,9 +8,17 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
     padding: 0 24px;
     background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.app-header .ant-segmented {
+    flex: 1;
+    justify-content: center;
+    max-width: 520px;
 }
 
 .header-logo {

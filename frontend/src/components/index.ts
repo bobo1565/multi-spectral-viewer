@@ -5,3 +5,5 @@ export { default as BlendPanel } from './BlendPanel';
 export { default as VegetationPanel } from './VegetationPanel';
 export { default as AlignmentPanel } from './AlignmentPanel';
 export { BatchImportDialog } from './BatchImportDialog';
+export { default as LivePanel } from './LivePanel';
+export { default as CameraManager } from './CameraManager';

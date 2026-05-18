@@ -33,3 +33,18 @@ class Image(Base):
 
     batch = relationship("Batch", back_populates="images")
 
+
+class Camera(Base):
+    """摄像头模型 - 由 ip_camera_viewer 迁入，支持波段标签用于抓拍"""
+    __tablename__ = "cameras"
+
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    ip = Column(String, nullable=True)
+    stream_url = Column(String, nullable=False)
+    username = Column(String, nullable=True)
+    password = Column(String, nullable=True)
+    camera_type = Column(String, nullable=True)  # ONVIF / RTSP / Manual
+    # 绑定波段类型: rgb / 570nm / 650nm / 730nm / 850nm / None
+    band_type = Column(String, nullable=True)
+    added_at = Column(DateTime, default=datetime.utcnow)

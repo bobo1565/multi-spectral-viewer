@@ -28,10 +28,11 @@ app.add_middleware(
 
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
-from app.api.routes import images, processing, blending, vegetation, alignment, batches
+from app.api.routes import images, processing, blending, vegetation, alignment, batches, cameras, capture
 from app.database import engine, Base, SessionLocal
 from app.services.image_db_service import ImageDBService
 from app.storage.file_manager import file_manager
+from app.camera import get_camera_service
 
 # 注册路由
 app.include_router(images.router, prefix="/api/images", tags=["images"])
@@ -40,13 +41,33 @@ app.include_router(blending.router, prefix="/api/blending", tags=["blending"])
 app.include_router(vegetation.router, prefix="/api/vegetation", tags=["vegetation"])
 app.include_router(alignment.router, prefix="/api/alignment", tags=["alignment"])
 app.include_router(batches.router, prefix="/api/batches", tags=["batches"])
+app.include_router(cameras.router, prefix="/api/cameras", tags=["cameras"])
+app.include_router(capture.router, prefix="/api/capture", tags=["capture"])
 
 
 @app.on_event("startup")
 async def startup_event():
     # 初始化数据库表
     Base.metadata.create_all(bind=engine)
-    
+
+    # 初始化摄像头服务（StreamManager + CameraDiscovery 单例）
+    camera_service = get_camera_service()
+
+    # 一次性迁移 cameras_db.json → Camera 表
+    try:
+        from app.services.camera_db_service import CameraDBService
+        migrated = CameraDBService.migrate_from_json(SessionLocal)
+        if migrated:
+            print(f"[Startup] 已从 cameras_db.json 迁移 {migrated} 个摄像头到数据库")
+        ensured = CameraDBService.ensure_default_cameras(SessionLocal)
+        if ensured["created"] or ensured["updated"]:
+            print(
+                f"[Startup] 默认摄像头已校准: 新增 {ensured['created']} 台, "
+                f"更新 {ensured['updated']} 台"
+            )
+    except Exception as e:
+        print(f"[Startup] 摄像头 JSON 迁移失败: {e}")
+
     # 导入所需模块
     import cv2
     import uuid
@@ -203,7 +224,15 @@ async def root():
     }
 
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    """关闭所有摄像头流，避免子线程泄漏"""
+    try:
+        get_camera_service().shutdown()
+    except Exception as e:
+        print(f"[Shutdown] 关闭摄像头流失败: {e}")
+
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
-

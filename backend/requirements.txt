@@ -11,3 +11,5 @@ aiofiles==23.2.1
 python-jose[cryptography]==3.3.0
 SQLAlchemy==2.0.23
 httpx>=0.25
+requests>=2.31.0
+netifaces>=0.11.0
