@@ -37,6 +37,10 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
     const [isStreamRenderingEnabled, setIsStreamRenderingEnabled] = useState(isDocumentVisible);
     const [maximizedCameraId, setMaximizedCameraId] = useState<string | null>(null);
 
+    // 所有窗口（无论大图/小图）共用同一码率/URL，确保切换大图时浏览器无需
+    // 重新建立 MJPEG 连接，避免出现新主画面或新小图黑屏的问题
+    const STREAM_QUALITY = 75;
+
     const loadCameras = useCallback(async () => {
         try {
             const data = await cameraApi.list();
@@ -45,6 +49,12 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
         } catch {
             message.error('加载摄像头列表失败');
         }
+    }, []);
+
+    const applyStreamStatuses = useCallback((statuses: StreamStatus[]) => {
+        const map: Record<string, StreamStatus> = {};
+        statuses.forEach(s => { map[s.camera_id] = s; });
+        setStreamStatuses(map);
     }, []);
 
     useEffect(() => {
@@ -98,9 +108,7 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
             try {
                 const statuses = await cameraApi.streamsStatus(activeIds, mainId);
                 if (cancelled) return;
-                const map: Record<string, StreamStatus> = {};
-                statuses.forEach(s => { map[s.camera_id] = s; });
-                setStreamStatuses(map);
+                applyStreamStatuses(statuses);
             } catch {
                 // 静默
             }
@@ -108,7 +116,7 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
         poll();
         const h = setInterval(poll, STATUS_POLL_MS);
         return () => { cancelled = true; clearInterval(h); };
-    }, [cameras, mainId]);
+    }, [applyStreamStatuses, cameras, mainId]);
 
     useEffect(() => {
         if (maximizedCameraId && !cameras.some(cam => cam.id === maximizedCameraId)) {
@@ -201,6 +209,21 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
         resumeStreamRendering(true);
     };
 
+    const handleSwapToMain = useCallback((cam_id: string) => {
+        // 只更新 mainId：所有窗口共用同一 stream URL，仅通过 CSS 切换布局，
+        // 因此无需重建 MJPEG 连接，从根本上规避切换大图时的黑屏问题
+        setMainId(cam_id);
+
+        const activeIds = cameras.map(c => c.id);
+        if (activeIds.length > 0) {
+            void cameraApi.streamsStatus(activeIds, cam_id)
+                .then(applyStreamStatuses)
+                .catch(() => {
+                    // 后续轮询会自动校正状态
+                });
+        }
+    }, [applyStreamStatuses, cameras]);
+
     const handleOpenMaximized = (cam_id: string) => {
         // 同时递增 previewSessionKey 和 refreshKey，确保 Modal 内的 img src 每次都是
         // 全新的 URL，强制浏览器建立全新的 MJPEG 连接，避免复用上一个摄像头的旧连接
@@ -238,10 +261,32 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
         return ordered;
     }, [cameras]);
 
-    const gridTiles = useMemo(() => tileItems.map((item) => {
+    const visibleTileItems = useMemo(
+        () => tileItems.slice(0, EXPECTED_CAMERA_COUNT),
+        [tileItems]
+    );
+
+    const mainTileIndex = useMemo(() => {
+        const explicitIndex = visibleTileItems.findIndex(
+            (item) => item.kind === 'camera' && item.camera.id === mainId
+        );
+        if (explicitIndex >= 0) {
+            return explicitIndex;
+        }
+
+        const firstCameraIndex = visibleTileItems.findIndex((item) => item.kind === 'camera');
+        return firstCameraIndex >= 0 ? firstCameraIndex : 0;
+    }, [visibleTileItems, mainId]);
+
+    const mainTile = visibleTileItems[mainTileIndex] ?? null;
+    const thumbnailTiles = visibleTileItems.filter((_, index) => index !== mainTileIndex);
+
+    const renderTile = (item: LiveTileItem, variant: 'main' | 'thumb') => {
+        const tileClassName = `live-tile live-tile-${variant}`;
+
         if (item.kind === 'placeholder') {
             return (
-                <div key={item.key} className="live-tile live-tile-placeholder">
+                <div key={item.key} className={`${tileClassName} live-tile-placeholder`}>
                     <div className="tile-placeholder-content">
                         <Tag color="default">{BAND_LABELS[item.band]}</Tag>
                         <div className="tile-placeholder-title">该波段还未配置摄像头</div>
@@ -258,16 +303,25 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
         const status = streamStatuses[cam.id];
         const isPausedForPreview = maximizedCameraId === cam.id;
         const pauseReason = !isStreamRenderingEnabled ? "页面切换后已暂停" : isPausedForPreview ? "单窗查看中" : null;
-        const streamSrc = pauseReason ? "" : cameraApi.streamUrl(cam.id, 60, refreshKey);
+        // 大图 / 小图共用同一 URL（同一 quality + cacheKey），切换大图时浏览器不会
+        // 重新建立 MJPEG 连接，<img> 元素也始终复用，从根源上规避黑屏问题
+        const streamSrc = pauseReason ? "" : cameraApi.streamUrl(cam.id, STREAM_QUALITY, refreshKey);
         const checked = selectedIds.includes(cam.id);
         const online = status?.is_connected ?? cam.is_connected ?? false;
+        const canPromoteToMain = variant === 'thumb';
+
+        const handleVideoClick = () => {
+            if (canPromoteToMain) {
+                handleSwapToMain(cam.id);
+            }
+        };
 
         return (
-            <div key={cam.id} className={`live-tile ${checked ? 'selected' : ''}`}>
+            <div key={cam.id} className={`${tileClassName} ${checked ? 'selected' : ''}`}>
                 {pauseReason ? (
                     <div
-                        className="tile-video tile-video-paused"
-                        onClick={() => toggleSelect(cam.id)}
+                        className={`tile-video tile-video-paused ${canPromoteToMain ? 'tile-video-clickable' : ''}`}
+                        onClick={handleVideoClick}
                         onDoubleClick={() => handleOpenMaximized(cam.id)}
                     >
                         <span className="tile-paused-badge">{pauseReason}</span>
@@ -275,10 +329,10 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
                 ) : (
                     <img
                         key={`${cam.id}-${refreshKey}`}
-                        className="tile-video"
+                        className={`tile-video ${canPromoteToMain ? 'tile-video-clickable' : ''}`}
                         src={streamSrc}
                         alt={cam.name}
-                        onClick={() => toggleSelect(cam.id)}
+                        onClick={handleVideoClick}
                         onDoubleClick={() => handleOpenMaximized(cam.id)}
                         onLoad={(e) => {
                             (e.target as HTMLImageElement).style.opacity = "1";
@@ -305,14 +359,16 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
                                 ]}
                             />
                         </div>
-                        <Tooltip title="最大化查看">
-                            <Button
-                                size="small"
-                                className="tile-maximize-btn"
-                                icon={<ExpandOutlined />}
-                                onClick={() => handleOpenMaximized(cam.id)}
-                            />
-                        </Tooltip>
+                        {variant !== 'main' && (
+                            <Tooltip title="切换到大图">
+                                <Button
+                                    size="small"
+                                    className="tile-maximize-btn"
+                                    icon={<ExpandOutlined />}
+                                    onClick={() => handleSwapToMain(cam.id)}
+                                />
+                            </Tooltip>
+                        )}
                     </div>
                 </div>
 
@@ -329,7 +385,7 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
                 </div>
             </div>
         );
-    }), [tileItems, streamStatuses, selectedIds, refreshKey, maximizedCameraId, isStreamRenderingEnabled, onGoCameraManager]);
+    };
 
     const maximizedCamera = useMemo(
         () => cameras.find(cam => cam.id === maximizedCameraId) || null,
@@ -390,8 +446,9 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
                     </Space>
                 </div>
             ) : (
-                <div className="live-grid">
-                    {gridTiles}
+                <div className="live-stage">
+                    {mainTile && renderTile(mainTile, 'main')}
+                    {thumbnailTiles.map((item) => renderTile(item, 'thumb'))}
                 </div>
             )}
 

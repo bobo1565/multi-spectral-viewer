@@ -40,13 +40,25 @@
     color: #888;
 }
 
-.live-grid {
+.live-stage {
     flex: 1;
-    overflow-y: auto;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: 1fr 280px;
+    grid-template-rows: repeat(4, minmax(0, 1fr));
     gap: 12px;
     padding-bottom: 16px;
+    min-height: 0;
+}
+
+.live-tile-main {
+    grid-row: 1 / -1;
+    grid-column: 1;
+    min-height: 520px;
+}
+
+.live-tile-thumb {
+    grid-column: 2;
+    min-height: 0;
 }
 
 .live-tile {
@@ -71,6 +83,18 @@
     background: #000;
     display: block;
     object-fit: contain;
+    cursor: default;
+}
+
+.live-tile-main .tile-video {
+    min-height: 520px;
+}
+
+.live-tile-thumb .tile-video {
+    min-height: 180px;
+}
+
+.live-tile .tile-video-clickable {
     cursor: pointer;
 }
 
@@ -186,6 +210,14 @@
     justify-content: center;
 }
 
+.live-tile-main.live-tile-placeholder {
+    min-height: 520px;
+}
+
+.live-tile-thumb.live-tile-placeholder {
+    min-height: 180px;
+}
+
 .tile-placeholder-content {
     padding: 24px;
     text-align: center;
@@ -234,4 +266,57 @@
     height: min(70vh, calc(100vh - 220px));
     object-fit: contain;
     background: #000;
+}
+
+@media (max-width: 1200px) {
+    .live-stage {
+        grid-template-columns: 1fr 240px;
+    }
+
+    .live-tile-main {
+        min-height: 460px;
+    }
+
+    .live-tile-main .tile-video,
+    .live-tile-main.live-tile-placeholder {
+        min-height: 460px;
+    }
+}
+
+@media (max-width: 900px) {
+    .live-panel-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .live-panel-header .header-right {
+        flex-wrap: wrap;
+    }
+
+    .live-stage {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: auto;
+        grid-auto-flow: row;
+    }
+
+    .live-tile-main {
+        grid-column: 1 / -1;
+        grid-row: auto;
+        min-height: 360px;
+    }
+
+    .live-tile-thumb {
+        grid-column: auto;
+    }
+
+    .live-tile-main .tile-video,
+    .live-tile-main.live-tile-placeholder {
+        min-height: 360px;
+    }
+}
+
+@media (max-width: 640px) {
+    .live-stage {
+        grid-template-columns: 1fr;
+    }
 }
