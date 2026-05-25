@@ -63,12 +63,16 @@ export const vegetationService = {
         return response.data;
     },
 
-    async calculateIndex(indexName: string, bands: any, colormap: string): Promise<any> {
-        const response = await api.post('/api/vegetation/calculate', {
+    async calculateIndex(indexName: string, bands: any, colormap: string, batchId?: string): Promise<any> {
+        const payload: any = {
             index_name: indexName,
             bands,
-            colormap
-        });
+            colormap,
+        };
+        if (batchId) {
+            payload.batch_id = batchId;
+        }
+        const response = await api.post('/api/vegetation/calculate', payload);
         return response.data;
     }
 };
@@ -174,8 +178,39 @@ export const batchService = {
         await api.delete(`/api/batches/${batchId}`);
     },
 
-    async deleteBatchImages(batchId: string, imageType: 'source' | 'aligned'): Promise<void> {
+    async deleteBatchImages(batchId: string, imageType: 'source' | 'aligned' | 'generated'): Promise<void> {
         await api.delete(`/api/batches/${batchId}/images/${imageType}`);
+    },
+
+    async renameBatch(batchId: string, newName: string): Promise<BatchInfo> {
+        const response = await api.patch(`/api/batches/${batchId}`, { new_name: newName });
+        return response.data;
+    },
+
+    async renameImage(batchId: string, imageId: string, newFilename: string): Promise<void> {
+        await api.patch(`/api/batches/${batchId}/images/${imageId}`, { new_filename: newFilename });
+    },
+
+    async saveGeneratedImage(
+        batchId: string,
+        filepath: string,
+        filename: string,
+        width: number,
+        height: number,
+        channels: number,
+        fileSize: number
+    ): Promise<any> {
+        const formData = new FormData();
+        formData.append('filepath', filepath);
+        formData.append('filename', filename);
+        formData.append('width', String(width));
+        formData.append('height', String(height));
+        formData.append('channels', String(channels));
+        formData.append('file_size', String(fileSize));
+        const response = await api.post(`/api/batches/${batchId}/generated`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        return response.data;
     },
 
     async importImages(

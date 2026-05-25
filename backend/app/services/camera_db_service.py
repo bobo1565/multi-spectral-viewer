@@ -130,6 +130,13 @@ class CameraDBService:
         if band_type in (None, ""):
             cam.band_type = None
         elif band_type in BAND_TYPES:
+            # 若目标波段已被另一摄像头占用，则交换波段
+            conflict = db.query(db_models.Camera).filter(
+                db_models.Camera.band_type == band_type,
+                db_models.Camera.id != cam_id
+            ).first()
+            if conflict:
+                conflict.band_type = cam.band_type
             cam.band_type = band_type
         else:
             return None

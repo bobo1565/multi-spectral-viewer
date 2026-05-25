@@ -9,6 +9,7 @@ import {
     Form,
     Input,
     Select,
+    Switch,
     message,
     Popconfirm,
     Progress,
@@ -54,9 +55,19 @@ const CameraManager: React.FC<CameraManagerProps> = ({ onBack }) => {
         }
     }, []);
 
+    const loadScanStatus = useCallback(async () => {
+        try {
+            const st = await cameraApi.scanStatus();
+            setScanStatus(st);
+        } catch {
+            /* ignore */
+        }
+    }, []);
+
     useEffect(() => {
         loadCameras();
-    }, [loadCameras]);
+        loadScanStatus();
+    }, [loadCameras, loadScanStatus]);
 
     // 扫描进行中时轮询状态
     useEffect(() => {
@@ -92,12 +103,7 @@ const CameraManager: React.FC<CameraManagerProps> = ({ onBack }) => {
     };
 
     const handleRefreshScanStatus = async () => {
-        try {
-            const st = await cameraApi.scanStatus();
-            setScanStatus(st);
-        } catch {
-            /* ignore */
-        }
+        await loadScanStatus();
     };
 
     const handleRefreshSavedCameras = async () => {
@@ -153,6 +159,15 @@ const CameraManager: React.FC<CameraManagerProps> = ({ onBack }) => {
         }
     };
 
+    const handleToggleMonitoring = async (camId: string) => {
+        try {
+            await cameraApi.toggleMonitoring(camId);
+            await loadCameras();
+        } catch {
+            message.error('切换监控状态失败');
+        }
+    };
+
     const submitManualAdd = async () => {
         try {
             const v = await addForm.validateFields();
@@ -201,6 +216,18 @@ const CameraManager: React.FC<CameraManagerProps> = ({ onBack }) => {
                         { value: '', label: '未绑定' },
                         ...BAND_TYPES.map((b) => ({ value: b, label: BAND_LABELS[b] })),
                     ]}
+                />
+            ),
+        },
+        {
+            title: '监控',
+            key: 'monitoring',
+            width: 70,
+            render: (_, row) => (
+                <Switch
+                    size="small"
+                    checked={row.is_monitoring !== false}
+                    onChange={() => handleToggleMonitoring(row.id)}
                 />
             ),
         },

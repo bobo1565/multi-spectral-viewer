@@ -10,7 +10,7 @@ from pathlib import Path
 import os; PROJECT_ROOT = Path("/app") if os.getenv("ENV") == "production" else Path(__file__).parent.parent.parent.parent.parent
 UPLOAD_DIR = str(PROJECT_ROOT / "uploads")
 
-from app.api.models import BatchCreate, BatchInfo, BatchImageInfo, BAND_TYPES
+from app.api.models import BatchCreate, BatchInfo, BatchImageInfo, BAND_TYPES, ImageRenameRequest, BatchRenameRequest
 from app.storage.file_manager import file_manager
 from app.database import get_db
 from app.services.batch_db_service import BatchDBService
@@ -48,18 +48,20 @@ def _batch_to_batch_info(batch, db: Session) -> BatchInfo:
     
     source_images = {}
     aligned_images = {}
+    generated_images = []
     
-    # 使用 image_type 字段分类，兼容旧数据使用路径检测
     for img in all_images:
         info = _image_to_batch_image_info(img)
         if not info:
             continue
         
-        # 优先使用 image_type 字段，如果为空则回退到路径检测
-        img_type = getattr(img, 'image_type', None) or ('aligned' if '/aligned/' in img.filepath else 'source')
+        img_type = getattr(img, 'image_type', None) or ('aligned' if '/aligned/' in img.filepath else (
+            'generated' if '/generated/' in img.filepath else 'source'))
         
         if img_type == 'aligned':
             aligned_images[img.band_type] = info
+        elif img_type == 'generated':
+            generated_images.append(info)
         else:
             source_images[img.band_type] = info
 
@@ -67,9 +69,10 @@ def _batch_to_batch_info(batch, db: Session) -> BatchInfo:
         id=batch.id,
         name=batch.name,
         created_at=batch.created_at,
-        images=source_images, # 兼容旧版前端，主要显示源图像
+        images=source_images,
         source_images=source_images,
-        aligned_images=aligned_images
+        aligned_images=aligned_images,
+        generated_images=generated_images
     )
 
 
@@ -124,14 +127,15 @@ async def delete_batch_images_by_type(batch_id: str, image_type: str, db: Sessio
     if not batch:
         raise HTTPException(status_code=404, detail="批次不存在")
         
-    if image_type not in ["source", "aligned"]:
-        raise HTTPException(status_code=400, detail="未知的图像类型，只能是 'source' 或 'aligned'")
+    if image_type not in ["source", "aligned", "generated"]:
+        raise HTTPException(status_code=400, detail="未知的图像类型，只能是 'source'、'aligned' 或 'generated'")
         
     all_images = BatchDBService.get_all_batch_images_list(db, batch_id)
     deleted_count = 0
     
     for img in all_images:
-        current_type = getattr(img, 'image_type', None) or ('aligned' if '/aligned/' in img.filepath else 'source')
+        current_type = getattr(img, 'image_type', None) or ('aligned' if '/aligned/' in img.filepath else (
+            'generated' if '/generated/' in img.filepath else 'source'))
         if current_type == image_type:
             # 物理文件删除
             file_manager.delete_file(img.id)
@@ -194,3 +198,91 @@ async def import_batch_images(
             raise HTTPException(status_code=500, detail=f"{band_type} 文件上传失败: {str(e)}")
     
     return _batch_to_batch_info(batch, db)
+
+
+@router.patch("/{batch_id}", response_model=BatchInfo)
+async def rename_batch(batch_id: str, body: BatchRenameRequest, db: Session = Depends(get_db)):
+    """重命名批次"""
+    batch = BatchDBService.get_batch(db, batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="批次不存在")
+    
+    batch.name = body.new_name
+    db.commit()
+    db.refresh(batch)
+    return _batch_to_batch_info(batch, db)
+
+
+@router.patch("/{batch_id}/images/{image_id}")
+async def rename_image(batch_id: str, image_id: str, body: ImageRenameRequest, db: Session = Depends(get_db)):
+    """重命名图像文件"""
+    batch = BatchDBService.get_batch(db, batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="批次不存在")
+    
+    img = ImageDBService.get_image(db, image_id)
+    if not img or img.batch_id != batch_id:
+        raise HTTPException(status_code=404, detail="图像不存在")
+    
+    img.filename = body.new_filename
+    db.commit()
+    return {"message": "重命名成功", "filename": body.new_filename}
+
+
+@router.post("/{batch_id}/generated", response_model=BatchImageInfo)
+async def add_generated_image(
+    batch_id: str,
+    filepath: str = Form(...),
+    filename: str = Form(...),
+    width: int = Form(...),
+    height: int = Form(...),
+    channels: int = Form(3),
+    file_size: int = Form(0),
+    db: Session = Depends(get_db)
+):
+    """将植被指数等临时结果保存为批次的 generated 图像"""
+    import shutil
+    import uuid as _uuid
+    batch = BatchDBService.get_batch(db, batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="批次不存在")
+    
+    image_id = str(_uuid.uuid4())
+    safe_name = filename.replace(" ", "_").replace("/", "_")
+    dest_filename = f"{image_id}_{safe_name}"
+    dest_path = os.path.join(UPLOAD_DIR, "original", dest_filename)
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    
+    if os.path.exists(filepath):
+        shutil.copy2(filepath, dest_path)
+        if file_size == 0:
+            file_size = os.path.getsize(dest_path)
+    else:
+        dest_path = filepath
+    
+    image_data = {
+        "id": image_id,
+        "batch_id": batch_id,
+        "band_type": "generated",
+        "image_type": "generated",
+        "filename": filename,
+        "filepath": dest_path,
+        "size": file_size,
+        "width": width,
+        "height": height,
+        "channels": channels,
+    }
+    db_img = ImageDBService.create_image(db, image_data)
+    
+    return BatchImageInfo(
+        id=db_img.id,
+        band_type=db_img.band_type or "generated",
+        filename=db_img.filename,
+        filepath=db_img.filepath,
+        url=f"/uploads/{os.path.relpath(db_img.filepath, UPLOAD_DIR)}",
+        size=db_img.file_size,
+        width=db_img.width,
+        height=db_img.height,
+        channels=db_img.channels,
+        upload_time=db_img.upload_time
+    )

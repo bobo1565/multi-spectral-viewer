@@ -3,15 +3,16 @@
 """
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
-from typing import List
+from typing import List, Optional
 from sqlalchemy.orm import Session
 import io
+import os
 
 from app.api.models import (
     VegetationIndexRequest,
     VegetationIndexInfo,
     VegetationIndexResponse,
-    BandSelection
+    BandSelection,
 )
 from app.storage.file_manager import file_manager
 from app.core.vegetation_index import VegetationIndexCalculator
@@ -42,18 +43,15 @@ async def list_vegetation_indices():
 
 @router.post("/calculate", response_model=VegetationIndexResponse)
 async def calculate_vegetation_index(request: VegetationIndexRequest, db: Session = Depends(get_db)):
-    """计算植被指数"""
+    """计算植被指数（不自动保存到批次，由前端控制保存时机）"""
     calc = VegetationIndexCalculator()
     
-    # 设置色带
     calc.set_colormap(request.colormap)
     
-    # 加载波段图像
     for band_name, band_sel in request.bands.items():
         channel_img = get_channel_from_image(db, band_sel.image_id, band_sel.channel)
         calc.set_band_image(band_name, channel_img)
     
-    # 检查是否可以计算
     if not calc.can_calculate(request.index_name):
         required_bands = calc.INDICES[request.index_name]['bands']
         raise HTTPException(
@@ -61,26 +59,22 @@ async def calculate_vegetation_index(request: VegetationIndexRequest, db: Sessio
             detail=f"缺少必要的波段。需要: {', '.join(required_bands)}"
         )
     
-    # 计算
     result = calc.calculate(request.index_name)
     if result is None:
         raise HTTPException(status_code=500, detail="计算失败")
     
-    # 获取着色后的结果
     colorized = calc.get_colorized_result()
-    
-    # 保存结果图像
-    result_path = file_manager.save_processed_image(
-        "vegetation",
-        colorized,
-        f"{request.index_name}_{request.colormap}"
-    )
-    
-    # 获取统计信息
     stats = calc.get_statistics()
     
-    # 构建公开访问的 URL
-    import os
-    result_url = f"/api/images/processed/{os.path.basename(result_path)}"
+    result_path = file_manager.save_processed_image("vegetation", colorized, f"{request.index_name}_{request.colormap}")
+    result_url = f"/uploads/processed/{os.path.basename(result_path)}"
     
-    return VegetationIndexResponse(result_url=result_url, statistics=stats)
+    return VegetationIndexResponse(
+        result_url=result_url,
+        result_filepath=result_path,
+        statistics=stats,
+        width=colorized.shape[1],
+        height=colorized.shape[0],
+        channels=colorized.shape[2] if len(colorized.shape) == 3 else 1,
+        file_size=os.path.getsize(result_path) if os.path.exists(result_path) else 0
+    )

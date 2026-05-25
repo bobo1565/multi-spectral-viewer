@@ -2,8 +2,8 @@
  * 多光谱图像分析系统 - 主应用
  */
 import React, { useState, useEffect, useMemo } from 'react';
-import { Layout, Button, message, Tree, Tabs, Popconfirm, Select, Segmented } from 'antd';
-import { DeleteOutlined, PictureOutlined, FolderOutlined, FileImageOutlined, ImportOutlined, VideoCameraOutlined, SettingOutlined, PieChartOutlined } from '@ant-design/icons';
+import { Layout, Button, Input, message, Tree, Tabs, Popconfirm, Select, Segmented } from 'antd';
+import { DeleteOutlined, EditOutlined, PictureOutlined, FolderOutlined, FileImageOutlined, ImportOutlined, VideoCameraOutlined, SettingOutlined, PieChartOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import { batchService, imageService, alignmentService } from './services/api';
 import type { BatchInfo, BandType, ImageInfo, BatchImageInfo } from './types';
@@ -25,7 +25,7 @@ interface SelectedNode {
     bandType: BandType;
     channel: ChannelType;
     image: ImageInfo | null;
-    imageType: 'source' | 'aligned';  // 标识选中的是 source 还是 aligned 图像
+    imageType: 'source' | 'aligned' | 'generated';
 }
 
 function _adaptBatchImage(img: any): ImageInfo {
@@ -47,11 +47,13 @@ function App() {
     const [batches, setBatches] = useState<BatchInfo[]>([]);
     const [images, setImages] = useState<ImageInfo[]>([]); // 保留用于兼容其他面板
     const [selectedNode, setSelectedNode] = useState<SelectedNode | null>(null);
+    const [selectedKey, setSelectedKey] = useState<string>('');
     const [pixelPosition, setPixelPosition] = useState<{ x: number; y: number } | null>(null);
     const [activePanel, setActivePanel] = useState('tool');
     const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
     const [sortBy, setSortBy] = useState<'name' | 'time'>('time'); // 排序方式
-    const [blendedImageUrl, setBlendedImageUrl] = useState<string | null>(null); // 混合预览图
+    const [blendedImageUrl, setBlendedImageUrl] = useState<string | null>(null);
+    const [compareLayer, setCompareLayer] = useState<{ url: string; opacity: number; clipPath?: string } | null>(null);
     const [importDialogOpen, setImportDialogOpen] = useState(false);
 
     // ROI 绘制模式
@@ -82,6 +84,36 @@ function App() {
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
     }, [roiDrawMode, sam2ClickMode]);
+
+    const [editingNodeKey, setEditingNodeKey] = useState<string | null>(null);
+    const [editingNodeValue, setEditingNodeValue] = useState('');
+
+    const handleStartRename = (key: string, currentValue: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        setEditingNodeKey(key);
+        setEditingNodeValue(currentValue);
+    };
+
+    const handleSubmitRename = async (_key: string, kind: 'batch' | 'image', batchId: string, imageId?: string) => {
+        const newValue = editingNodeValue.trim();
+        setEditingNodeKey(null);
+        if (!newValue) return;
+
+        try {
+            if (kind === 'batch') {
+                await batchService.renameBatch(batchId, newValue);
+            } else if (imageId) {
+                await batchService.renameImage(batchId, imageId, newValue);
+            }
+            await loadBatches();
+        } catch {
+            message.error('重命名失败');
+        }
+    };
+
+    const handleCancelRename = () => {
+        setEditingNodeKey(null);
+    };
 
     // 图像处理状态
     const [colormap, setColormap] = useState('gray'); // 色带
@@ -134,14 +166,32 @@ function App() {
 
     useEffect(() => {
         loadBatches();
-        loadImages(); // 继续加载单独图像用于兼容
+        loadImages();
+    }, []);
+
+    // 监听植被指数生成完毕事件，自动展开 Generated 文件夹
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail as { batchId: string };
+            if (detail?.batchId) {
+                setExpandedKeys(prev => {
+                    const genKey = `${detail.batchId}-generated`;
+                    if (prev.includes(genKey)) return prev;
+                    return Array.from(new Set([...prev, genKey, detail.batchId]));
+                });
+            }
+        };
+        window.addEventListener('generated-image-added', handler);
+        return () => window.removeEventListener('generated-image-added', handler);
     }, []);
 
     const loadBatches = async () => {
         try {
             const data = await batchService.listBatches();
+            console.log('[loadBatches] received', data.length, 'batches, first generated:', data[0]?.generated_images?.length);
             setBatches(data);
         } catch (error) {
+            console.error('[loadBatches] failed', error);
             message.error('加载批次列表失败');
         }
     };
@@ -162,6 +212,7 @@ function App() {
             await loadBatches();
             if (selectedNode?.batchId === batchId) {
                 setSelectedNode(null);
+                setSelectedKey('');
             }
         } catch (error) {
             message.error('删除失败');
@@ -175,19 +226,22 @@ function App() {
             await loadBatches();
             if (selectedNode?.image?.id === imageId) {
                 setSelectedNode(null);
+                setSelectedKey('');
             }
         } catch (error) {
             message.error('删除图像失败');
         }
     };
 
-    const handleDeleteBatchImages = async (batchId: string, imageType: 'source' | 'aligned') => {
+    const handleDeleteBatchImages = async (batchId: string, imageType: 'source' | 'aligned' | 'generated') => {
         try {
+            const label = imageType === 'source' ? 'Source' : imageType === 'aligned' ? 'Aligned' : 'Generated';
             await batchService.deleteBatchImages(batchId, imageType);
-            message.success(`${imageType === 'source' ? 'Source' : 'Aligned'} 文件删除成功`);
+            message.success(`${label} 文件删除成功`);
             await loadBatches();
             if (selectedNode?.batchId === batchId && selectedNode?.imageType === imageType) {
                 setSelectedNode(null);
+                setSelectedKey('');
             }
         } catch (error) {
             message.error(`删除 ${imageType} 失败`);
@@ -245,17 +299,39 @@ function App() {
             return BAND_TYPES.map(band => {
                 const img = imagesMap[band];
                 const nodeKey = `${batchId}-${prefix}-${band}`;
+                const isEditingImg = editingNodeKey === nodeKey;
 
                 if (img) {
                     return {
                         key: nodeKey,
                         title: (
-                            <div className={`channel-node ${img ? 'has-image' : 'no-image'} tree-node-title`}>
+                            <div className={`channel-node ${img ? 'has-image' : 'no-image'} tree-node-title`} onClick={(e) => { if (isEditingImg) e.stopPropagation(); }}>
                                 <FileImageOutlined />
                                 <span>{BAND_LABELS[band]}</span>
                                 {img && (
                                     <>
-                                        <span className="file-name node-name" style={{ marginLeft: 4 }}>({img.filename})</span>
+                                        {isEditingImg ? (
+                                            <Input
+                                                size="small"
+                                                className="rename-input"
+                                                value={editingNodeValue}
+                                                onChange={(e) => setEditingNodeValue(e.target.value)}
+                                                onPressEnter={() => handleSubmitRename(nodeKey, 'image', batchId, img.id)}
+                                                onBlur={handleCancelRename}
+                                                onKeyDown={(e) => { if (e.key === 'Escape') handleCancelRename(); }}
+                                                autoFocus
+                                                onClick={(e) => e.stopPropagation()}
+                                            />
+                                        ) : (
+                                            <span className="file-name node-name" style={{ marginLeft: 4 }}>({img.filename})</span>
+                                        )}
+                                        <Button
+                                            size="small"
+                                            type="text"
+                                            icon={<EditOutlined />}
+                                            onClick={(e) => handleStartRename(nodeKey, img.filename, e)}
+                                            className="edit-btn"
+                                        />
                                         <Popconfirm
                                             title="确定删除此图像?"
                                             onConfirm={(e) => {
@@ -319,22 +395,45 @@ function App() {
         };
 
         return sortedBatches.map((batch: BatchInfo) => {
-            // 计算已有图像数量
-            // 兼容旧数据 images，以及新数据 source_images/aligned_images
             const sourceImgs = batch.source_images || batch.images || ({} as Record<string, BatchImageInfo | null>);
             const alignedImgs = batch.aligned_images || ({} as Record<string, BatchImageInfo | null>);
+            const generatedImgs = batch.generated_images || [];
 
             const sourceCount = BAND_TYPES.filter(band => sourceImgs[band] !== null && sourceImgs[band] !== undefined).length;
             const alignedCount = BAND_TYPES.filter(band => alignedImgs[band] !== null && alignedImgs[band] !== undefined).length;
-            const totalCount = sourceCount + alignedCount;
+            const generatedCount = generatedImgs.length;
+            const totalCount = sourceCount + alignedCount + generatedCount;
+
+            const isEditingBatch = editingNodeKey === batch.id;
 
             return {
                 key: batch.id,
                 title: (
-                    <div className="tree-node-title">
+                    <div className="tree-node-title" onClick={(e) => { if (isEditingBatch) e.stopPropagation(); }}>
                         <FolderOutlined />
-                        <span className="node-name">{batch.name}</span>
+                        {isEditingBatch ? (
+                            <Input
+                                size="small"
+                                className="rename-input"
+                                value={editingNodeValue}
+                                onChange={(e) => setEditingNodeValue(e.target.value)}
+                                onPressEnter={() => handleSubmitRename(batch.id, 'batch', batch.id)}
+                                onBlur={handleCancelRename}
+                                onKeyDown={(e) => { if (e.key === 'Escape') handleCancelRename(); }}
+                                autoFocus
+                                onClick={(e) => e.stopPropagation()}
+                            />
+                        ) : (
+                            <span className="node-name">{batch.name}</span>
+                        )}
                         <span className="node-size">{totalCount} items</span>
+                        <Button
+                            size="small"
+                            type="text"
+                            icon={<EditOutlined />}
+                            onClick={(e) => handleStartRename(batch.id, batch.name, e)}
+                            className="edit-btn"
+                        />
                         <Popconfirm
                             title="确定删除此批次及其所有图像?"
                             onConfirm={() => handleDeleteBatch(batch.id)}
@@ -416,18 +515,108 @@ function App() {
                             </div>
                         ),
                         children: generateBandNodes(batch.id, 'aligned', alignedImgs)
+                    },
+                    {
+                        key: `${batch.id}-generated`,
+                        title: (
+                            <div className="tree-node-title">
+                                <FolderOutlined />
+                                <span className="node-name">Generated</span>
+                                <span className="node-size" style={{ fontSize: '10px', marginLeft: 4 }}>({generatedCount})</span>
+                                {generatedCount > 0 && (
+                                    <Popconfirm
+                                        title="确定删除所有 Generated 图像?"
+                                        onConfirm={(e) => {
+                                            e?.stopPropagation();
+                                            handleDeleteBatchImages(batch.id, 'generated');
+                                        }}
+                                        onCancel={(e) => e?.stopPropagation()}
+                                        okText="确定"
+                                        cancelText="取消"
+                                    >
+                                        <Button
+                                            size="small"
+                                            danger
+                                            type="text"
+                                            icon={<DeleteOutlined />}
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="delete-btn"
+                                        />
+                                    </Popconfirm>
+                                )}
+                            </div>
+                        ),
+                        children: generatedImgs.map((gImg) => {
+                            const imgNodeKey = `${batch.id}-generated-${gImg.id}`;
+                            const isEditingImg = editingNodeKey === imgNodeKey;
+                            return {
+                                key: imgNodeKey,
+                                title: (
+                                    <div className="channel-node tree-node-title" onClick={(e) => { if (isEditingImg) e.stopPropagation(); }}>
+                                        <FileImageOutlined />
+                                        {isEditingImg ? (
+                                            <Input
+                                                size="small"
+                                                className="rename-input"
+                                                value={editingNodeValue}
+                                                onChange={(e) => setEditingNodeValue(e.target.value)}
+                                                onPressEnter={() => handleSubmitRename(imgNodeKey, 'image', batch.id, gImg.id)}
+                                                onBlur={handleCancelRename}
+                                                onKeyDown={(e) => { if (e.key === 'Escape') handleCancelRename(); }}
+                                                autoFocus
+                                                onClick={(e) => e.stopPropagation()}
+                                            />
+                                        ) : (
+                                            <span className="node-name">{gImg.filename}</span>
+                                        )}
+                                        <Button
+                                            size="small"
+                                            type="text"
+                                            icon={<EditOutlined />}
+                                            onClick={(e) => handleStartRename(imgNodeKey, gImg.filename, e)}
+                                            className="edit-btn"
+                                        />
+                                        <Popconfirm
+                                            title="确定删除此生成图像?"
+                                            onConfirm={(e) => {
+                                                e?.stopPropagation();
+                                                handleDeleteImage(gImg.id);
+                                            }}
+                                            onCancel={(e) => e?.stopPropagation()}
+                                            okText="确定"
+                                            cancelText="取消"
+                                        >
+                                            <Button
+                                                size="small"
+                                                danger
+                                                type="text"
+                                                icon={<DeleteOutlined />}
+                                                onClick={(e) => e.stopPropagation()}
+                                                className="delete-btn"
+                                            />
+                                        </Popconfirm>
+                                    </div>
+                                ),
+                                isLeaf: true,
+                            };
+                        })
                     }
                 ]
             };
         });
-    }, [batches, sortBy]);
+    }, [batches, sortBy, editingNodeKey, editingNodeValue]);
 
     // 处理树节点选择
     const handleTreeSelect = (selectedKeys: React.Key[]) => {
-        setBlendedImageUrl(null); // 切换图片时清除混合图层
-        if (selectedKeys.length === 0) return;
+        setBlendedImageUrl(null);
+        setCompareLayer(null);
+        if (selectedKeys.length === 0) {
+            setSelectedKey('');
+            return;
+        }
 
         const key = selectedKeys[0] as string;
+        setSelectedKey(key);
 
         // Key formats:
         // Batch: UUID
@@ -470,11 +659,42 @@ function App() {
 
         if (!matchedBatch) return;
 
-        // suffix could be: "source", "aligned", "source-rgb", "source-rgb-r", etc.
+        // suffix could be: "source", "aligned", "generated", "source-rgb", "source-rgb-r", etc.
         const parts = suffix.split('-');
-        const folderType = parts[0]; // "source" or "aligned"
+        const folderType = parts[0];
 
-        if (folderType !== 'source' && folderType !== 'aligned') return;
+        if (folderType !== 'source' && folderType !== 'aligned' && folderType !== 'generated') return;
+
+        if (folderType === 'generated') {
+            if (parts.length === 1) {
+                // Selected "Generated" folder -> show first generated image if any
+                const genImgs = matchedBatch.generated_images || [];
+                if (genImgs.length > 0) {
+                    setSelectedNode({
+                        batchId: matchedBatch.id,
+                        bandType: 'rgb',
+                        channel: 'rgb',
+                        image: _adaptBatchImage(genImgs[0]),
+                        imageType: 'generated'
+                    });
+                }
+                return;
+            }
+            // parts[1] is the generated image ID
+            const genImgId = parts[1];
+            const genImgs = matchedBatch.generated_images || [];
+            const genImg = genImgs.find(g => g.id === genImgId);
+            if (genImg) {
+                setSelectedNode({
+                    batchId: matchedBatch.id,
+                    bandType: 'rgb',
+                    channel: 'rgb',
+                    image: _adaptBatchImage(genImg),
+                    imageType: 'generated'
+                });
+            }
+            return;
+        }
 
         const imgMap = folderType === 'source'
             ? (matchedBatch.source_images || matchedBatch.images || ({} as Record<string, BatchImageInfo | null>))
@@ -547,14 +767,18 @@ function App() {
 
         const imgs: ImageInfo[] = [];
         BAND_TYPES.forEach(band => {
-            // Check source
             const sImg = batch.source_images?.[band] || batch.images?.[band];
             if (sImg) imgs.push(_adaptBatchImage(sImg));
 
-            // Check aligned
             const aImg = batch.aligned_images?.[band];
             if (aImg) imgs.push(_adaptBatchImage(aImg));
         });
+
+        if (batch.generated_images) {
+            batch.generated_images.forEach(gImg => {
+                imgs.push(_adaptBatchImage(gImg));
+            });
+        }
 
         return imgs.length > 0 ? imgs : allImages;
     }, [selectedNode, batches, allImages]);
@@ -608,7 +832,7 @@ function App() {
             label: '光谱混合',
             children: <BlendPanel
                 batch={selectedNode?.batchId ? batches.find((b: BatchInfo) => b.id === selectedNode.batchId) : null}
-                imageType={selectedNode?.imageType || 'source'}
+                imageType={selectedNode?.imageType && selectedNode.imageType !== 'generated' ? selectedNode.imageType : 'source'}
                 pixelPosition={pixelPosition}
                 onBlendedImageUrlChange={setBlendedImageUrl}
             />,
@@ -618,7 +842,11 @@ function App() {
             label: '植被指数',
             children: <VegetationPanel
                 images={currentBatchImages}
+                batches={batches}
+                batchId={selectedNode?.batchId}
                 onBlendedImageUrlChange={setBlendedImageUrl}
+                onGeneratedImageAdded={loadBatches}
+                onCompareChange={setCompareLayer}
             />,
         },
     ];
@@ -713,10 +941,7 @@ function App() {
                     <div className="image-tree">
                         <Tree
                             treeData={treeData}
-                            selectedKeys={selectedNode ?
-                                [`${selectedNode.batchId}-${selectedNode.bandType}-${selectedNode.channel}`]
-                                : []
-                            }
+                            selectedKeys={selectedKey ? [selectedKey] : []}
                             expandedKeys={expandedKeys}
                             onExpand={(keys) => setExpandedKeys(keys as string[])}
                             onSelect={handleTreeSelect}
@@ -736,12 +961,27 @@ function App() {
                     <ImageViewer
                         image={selectedNode?.image || null}
                         blendedUrl={blendedImageUrl}
-                        layers={sam2MaskB64 ? [{
-                            id: 'sam2-mask',
-                            url: `data:image/png;base64,${sam2MaskB64}`,
-                            opacity: 0.5,
-                            blendMode: 'screen'
-                        }] : []}
+                        layers={(() => {
+                            const list = [];
+                            if (sam2MaskB64) {
+                                list.push({
+                                    id: 'sam2-mask',
+                                    url: `data:image/png;base64,${sam2MaskB64}`,
+                                    opacity: 0.5,
+                                    blendMode: 'screen' as React.CSSProperties['mixBlendMode']
+                                });
+                            }
+                            if (compareLayer) {
+                                list.push({
+                                    id: 'compare-layer',
+                                    url: compareLayer.url,
+                                    opacity: compareLayer.opacity,
+                                    blendMode: 'normal' as React.CSSProperties['mixBlendMode'],
+                                    clipPath: compareLayer.clipPath
+                                });
+                            }
+                            return list;
+                        })()}
                         channel={selectedNode?.channel || 'rgb'}
                         colormap={colormap}
                         whiteBalance={whiteBalance}

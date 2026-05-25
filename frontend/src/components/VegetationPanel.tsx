@@ -1,15 +1,27 @@
 /**
  * 植被指数面板组件
  */
-import { useState, useEffect } from 'react';
-import { Card, Select, Button, Row, Col, Statistic, Divider, Tag } from 'antd';
+import { useState, useEffect, useMemo } from 'react';
+import { Card, Select, Button, Row, Col, Statistic, Divider, Tag, message, Modal, Input, Slider, Radio } from 'antd';
 import { vegetationService } from '../services/api';
-import type { ImageInfo, VegetationIndexInfo } from '../types';
+import { batchService } from '../services/api';
+import type { ImageInfo, VegetationIndexInfo, BatchInfo } from '../types';
+import { BAND_TYPES, BAND_LABELS } from '../types';
 import './VegetationPanel.css';
+
+interface CompareLayer {
+    url: string;
+    opacity: number;
+    clipPath?: string;
+}
 
 interface Props {
     images: ImageInfo[];
+    batches?: BatchInfo[];
+    batchId?: string;
     onBlendedImageUrlChange?: (url: string | null) => void;
+    onGeneratedImageAdded?: () => Promise<void>;
+    onCompareChange?: (layer: CompareLayer | null) => void;
 }
 
 // 波段类型（用于后续扩展）
@@ -24,13 +36,63 @@ const COLORMAP_OPTIONS = [
     { label: 'Gray (灰度)', value: 'Gray' },
 ];
 
-export default function VegetationPanel({ images, onBlendedImageUrlChange }: Props) {
+export default function VegetationPanel({ images, batches, batchId, onBlendedImageUrlChange, onGeneratedImageAdded, onCompareChange }: Props) {
     const [indices, setIndices] = useState<VegetationIndexInfo[]>([]);
     const [selectedIndex, setSelectedIndex] = useState<string>('NDVI');
     const [bandMapping, setBandMapping] = useState<Record<string, { imageId: string; channel: string }>>({});
     const [colormap, setColormap] = useState('RdYlGn');
     const [result, setResult] = useState<{ url: string; stats: Record<string, number> } | null>(null);
     const [loading, setLoading] = useState(false);
+    const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+    const [saveName, setSaveName] = useState('');
+    const [calcMeta, setCalcMeta] = useState<{
+        filepath: string; width: number; height: number; channels: number; fileSize: number;
+        indexName: string;
+    } | null>(null);
+
+    const getEffectiveBatchId = (): string | undefined => {
+        if (batchId) return batchId;
+        if (!batches) return undefined;
+        for (const b of Object.values(bandMapping)) {
+            if (!b.imageId) continue;
+            const found = batches.find(batch => {
+                for (const bt of BAND_TYPES) {
+                    const img = batch.source_images?.[bt] || batch.aligned_images?.[bt] || batch.images?.[bt];
+                    if (img?.id === b.imageId) return true;
+                }
+                if ((batch.generated_images || []).some(g => g.id === b.imageId)) return true;
+                return false;
+            });
+            if (found) return found.id;
+        }
+        return undefined;
+    };
+
+    // 图像比对状态
+    const [compareSelectedKey, setCompareSelectedKey] = useState<string>('');
+    const [compareMode, setCompareMode] = useState<'off' | 'slider' | 'curtain'>('off');
+    const [compareValue, setCompareValue] = useState(50);
+
+    // 收集当前批次中可用于比对的所有图像
+    const compareOptions = useMemo(() => {
+        const options: { key: string; label: string; url: string }[] = [{ key: '', label: '关闭比对', url: '' }];
+        if (!batches) return options;
+        const targetBatchId = getEffectiveBatchId();
+        const batch = batches.find(b => b.id === targetBatchId);
+        if (!batch) return options;
+        BAND_TYPES.forEach(bt => {
+            const img = batch.aligned_images?.[bt];
+            if (img) {
+                const fullUrl = img.url.startsWith('http') ? img.url : `http://localhost:8000${img.url}`;
+                options.push({ key: `aligned-${bt}`, label: `[Aligned] ${BAND_LABELS[bt]}`, url: fullUrl });
+            }
+        });
+        (batch.generated_images || []).forEach(gImg => {
+            const fullUrl = gImg.url.startsWith('http') ? gImg.url : `http://localhost:8000${gImg.url}`;
+            options.push({ key: `gen-${gImg.id}`, label: `[Generated] ${gImg.filename}`, url: fullUrl });
+        });
+        return options;
+    }, [batches, bandMapping, batchId]);
 
     useEffect(() => {
         loadIndices();
@@ -69,6 +131,29 @@ export default function VegetationPanel({ images, onBlendedImageUrlChange }: Pro
         }
     }, [selectedIndex, images, indices]);
 
+    // 同步比对状态到父组件
+    useEffect(() => {
+        if (!onCompareChange) return;
+        if (compareMode === 'off' || !compareSelectedKey) {
+            onCompareChange(null);
+            return;
+        }
+        const opt = compareOptions.find(o => o.key === compareSelectedKey);
+        if (!opt || !opt.url) {
+            onCompareChange(null);
+            return;
+        }
+        if (compareMode === 'slider') {
+            onCompareChange({ url: opt.url, opacity: compareValue / 100 });
+        } else {
+            onCompareChange({
+                url: opt.url,
+                opacity: 1,
+                clipPath: `inset(0 ${100 - compareValue}% 0 0)`
+            });
+        }
+    }, [compareMode, compareSelectedKey, compareValue, compareOptions, onCompareChange]);
+
     const loadIndices = async () => {
         try {
             const data = await vegetationService.listIndices();
@@ -94,8 +179,9 @@ export default function VegetationPanel({ images, onBlendedImageUrlChange }: Pro
 
     const handleCalculate = async () => {
         setLoading(true);
+        setResult(null);
+        setCalcMeta(null);
         try {
-            // 构造后端需要的波段映射格式
             const bands: any = {};
             let missing = false;
 
@@ -115,18 +201,65 @@ export default function VegetationPanel({ images, onBlendedImageUrlChange }: Pro
             const data = await vegetationService.calculateIndex(selectedIndex, bands, colormap);
             console.log('Calculated Index Data:', data);
 
-            // 结果 URL 需要补全 host
-            const fullUrl = `http://localhost:8000${data.result_url}`;
+            let fullUrl: string;
+            if (data.result_url.startsWith('http')) {
+                fullUrl = data.result_url;
+            } else {
+                fullUrl = `http://localhost:8000${data.result_url}`;
+            }
             console.log('Result Full URL:', fullUrl);
             setResult({
                 url: fullUrl,
                 stats: data.statistics
             });
+            setCalcMeta({
+                filepath: data.result_filepath || '',
+                width: data.width || 0,
+                height: data.height || 0,
+                channels: data.channels || 3,
+                fileSize: data.file_size || 0,
+                indexName: selectedIndex,
+            });
 
-            // 通知 ImageViewer 显示结果
             onBlendedImageUrlChange?.(fullUrl);
         } catch (error) {
             console.error('Calculation failed:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSave = async () => {
+        const targetBatchId = getEffectiveBatchId();
+        if (!targetBatchId) {
+            message.warning('无法确定目标批次，请在左侧树中先选择一个批次');
+            return;
+        }
+        if (!calcMeta || !saveName.trim()) return;
+
+        setLoading(true);
+        try {
+            await batchService.saveGeneratedImage(
+                targetBatchId,
+                calcMeta.filepath,
+                saveName.trim(),
+                calcMeta.width,
+                calcMeta.height,
+                calcMeta.channels,
+                calcMeta.fileSize
+            );
+            setSaveDialogOpen(false);
+            setSaveName('');
+            message.success(`已保存 "${saveName.trim()}" 到 Generated 目录`);
+            if (onGeneratedImageAdded) {
+                await onGeneratedImageAdded();
+            }
+            window.dispatchEvent(new CustomEvent('generated-image-added', {
+                detail: { batchId: targetBatchId }
+            }));
+        } catch (error) {
+            console.error('Save failed:', error);
+            message.error('保存失败');
         } finally {
             setLoading(false);
         }
@@ -212,6 +345,83 @@ export default function VegetationPanel({ images, onBlendedImageUrlChange }: Pro
             <Button type="primary" block onClick={handleCalculate} loading={loading}>
                 计算 {selectedIndex}
             </Button>
+
+            {result && calcMeta && (
+                <>
+                    <Divider />
+                    <Button
+                        type="default"
+                        block
+                        onClick={() => {
+                            setSaveName(`${calcMeta.indexName}_${colormap}.png`);
+                            setSaveDialogOpen(true);
+                        }}
+                    >
+                        保存到批次
+                    </Button>
+                </>
+            )}
+
+            <Divider>图像比对</Divider>
+
+            <Select
+                value={compareSelectedKey}
+                onChange={(v) => {
+                    setCompareSelectedKey(v);
+                    if (!v) setCompareMode('off');
+                }}
+                options={compareOptions.map(o => ({ value: o.key, label: o.label }))}
+                style={{ width: '100%', marginBottom: 8 }}
+                placeholder="选择比对图像"
+            />
+
+            {compareSelectedKey && (
+                <>
+                    <Radio.Group
+                        value={compareMode}
+                        onChange={(e) => setCompareMode(e.target.value)}
+                        size="small"
+                        style={{ marginBottom: 8 }}
+                    >
+                        <Radio.Button value="slider">百分比过渡</Radio.Button>
+                        <Radio.Button value="curtain">卷帘对比</Radio.Button>
+                    </Radio.Group>
+
+                    <div style={{ padding: '0 4px' }}>
+                        <span style={{ fontSize: 12, color: '#888' }}>
+                            {compareMode === 'slider' ? `透明度: ${compareValue}%` : `分割位置: ${compareValue}%`}
+                        </span>
+                        <Slider
+                            min={0}
+                            max={100}
+                            value={compareValue}
+                            onChange={(v) => setCompareValue(v)}
+                            tooltip={{ formatter: (v) => `${v}%` }}
+                        />
+                    </div>
+                </>
+            )}
+
+            <Modal
+                title="保存生成图像"
+                open={saveDialogOpen}
+                onOk={handleSave}
+                onCancel={() => setSaveDialogOpen(false)}
+                okText="保存"
+                cancelText="取消"
+                confirmLoading={loading}
+                destroyOnHidden
+            >
+                <div style={{ marginBottom: 8 }}>
+                    <span>图像名称：</span>
+                </div>
+                <Input
+                    value={saveName}
+                    onChange={(e) => setSaveName(e.target.value)}
+                    onPressEnter={handleSave}
+                    placeholder="输入图像名称"
+                />
+            </Modal>
 
             {result && (
                 <>

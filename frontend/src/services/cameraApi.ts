@@ -39,6 +39,11 @@ export const cameraApi = {
         return res.data;
     },
 
+    async toggleMonitoring(cam_id: string): Promise<CameraInfo> {
+        const res = await api.put(`/api/cameras/${cam_id}/monitoring`);
+        return res.data;
+    },
+
     async remove(cam_id: string): Promise<void> {
         await api.delete(`/api/cameras/${cam_id}`);
     },

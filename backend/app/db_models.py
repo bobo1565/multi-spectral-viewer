@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from .database import Base
@@ -47,4 +47,5 @@ class Camera(Base):
     camera_type = Column(String, nullable=True)  # ONVIF / RTSP / Manual
     # 绑定波段类型: rgb / 570nm / 650nm / 730nm / 850nm / None
     band_type = Column(String, nullable=True)
+    is_monitoring = Column(Boolean, default=True)  # 是否加入实时监控（默认加入）
     added_at = Column(DateTime, default=datetime.utcnow)

@@ -50,11 +50,11 @@
     background: #1a1a1a;
     border-radius: 8px;
     position: relative;
-    cursor: grab;
+    cursor: crosshair;
 }
 
 .viewer-container:active {
-    cursor: grabbing;
+    cursor: crosshair;
 }
 
 .viewer-container img {

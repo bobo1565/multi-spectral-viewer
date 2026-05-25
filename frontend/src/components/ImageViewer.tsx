@@ -24,6 +24,7 @@ export interface ViewerLayer {
     opacity?: number;
     blendMode?: React.CSSProperties['mixBlendMode'];
     visible?: boolean;
+    clipPath?: string;
 }
 
 interface Props {
@@ -523,7 +524,8 @@ export default function ImageViewer({
                                     className="viewer-layer viewer-overlay-layer"
                                     style={{
                                         opacity: layer.opacity ?? 1,
-                                        mixBlendMode: layer.blendMode ?? 'normal'
+                                        mixBlendMode: layer.blendMode ?? 'normal',
+                                        clipPath: layer.clipPath ?? 'none',
                                     }}
                                     draggable={false}
                                 />

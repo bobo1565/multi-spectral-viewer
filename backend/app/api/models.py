@@ -83,6 +83,7 @@ class VegetationIndexRequest(BaseModel):
     index_name: Literal["NDVI", "GNDVI", "NDRE", "SAVI", "EVI"]
     bands: Dict[str, BandSelection]  # {"NIR": {...}, "RED": {...}, ...}
     colormap: str = "RdYlGn"
+    batch_id: Optional[str] = None
 
 
 class VegetationIndexInfo(BaseModel):
@@ -94,7 +95,12 @@ class VegetationIndexInfo(BaseModel):
 
 class VegetationIndexResponse(BaseModel):
     result_url: str
+    result_filepath: str = ""
     statistics: Dict[str, float]
+    width: int = 0
+    height: int = 0
+    channels: int = 3
+    file_size: int = 0
 
 
 # 对齐相关模型
@@ -141,6 +147,15 @@ class BatchInfo(BaseModel):
     images: Dict[str, Optional[BatchImageInfo]]  # Deprecated: usage in frontend to be migrated
     source_images: Dict[str, Optional[BatchImageInfo]] = {}
     aligned_images: Dict[str, Optional[BatchImageInfo]] = {}
+    generated_images: List[BatchImageInfo] = []
+
+
+class ImageRenameRequest(BaseModel):
+    new_filename: str
+
+
+class BatchRenameRequest(BaseModel):
+    new_name: str
 
 
 # ---------- 摄像头相关模型 ----------
@@ -156,6 +171,7 @@ class CameraInfo(BaseModel):
     username: Optional[str] = None
     camera_type: Optional[str] = None
     band_type: Optional[str] = None
+    is_monitoring: bool = True
     added_at: datetime
     is_running: bool = False      # 流是否在后台运行
     is_connected: bool = False    # 是否能拿到帧

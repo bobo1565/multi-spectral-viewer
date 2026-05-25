@@ -106,6 +106,7 @@ export interface BatchInfo {
     images: Record<BandType, BatchImageInfo | null>;
     source_images?: Record<BandType, BatchImageInfo | null>;
     aligned_images?: Record<BandType, BatchImageInfo | null>;
+    generated_images?: BatchImageInfo[];
 }
 
 
@@ -118,6 +119,7 @@ export interface CameraInfo {
     username?: string | null;
     camera_type?: string | null;
     band_type?: BandType | null;
+    is_monitoring?: boolean;
     added_at: string;
     is_running?: boolean;
     is_connected?: boolean;

@@ -9,6 +9,7 @@ import urllib.parse
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.orm import Session
 
@@ -29,17 +30,8 @@ from app.services.camera_db_service import CameraDBService
 router = APIRouter()
 
 
-def _camera_to_info(cam, stream_manager) -> CameraInfo:
-    """DB 模型 → 响应模型，并合并运行中流的状态"""
-    stream = stream_manager.get_stream(cam.id)
-    is_running = stream is not None
-    is_connected = False
-    fps = 0
-    if stream is not None:
-        st = stream.get_status()
-        is_connected = bool(st.get("is_connected"))
-        fps = int(st.get("fps", 0))
-
+def _camera_to_info(cam) -> CameraInfo:
+    """DB 模型 → 响应模型（不含流状态，流状态由 streams/status 单独获取）"""
     return CameraInfo(
         id=cam.id,
         name=cam.name,
@@ -48,10 +40,11 @@ def _camera_to_info(cam, stream_manager) -> CameraInfo:
         username=cam.username,
         camera_type=cam.camera_type,
         band_type=cam.band_type,
+        is_monitoring=getattr(cam, 'is_monitoring', True),
         added_at=cam.added_at,
-        is_running=is_running,
-        is_connected=is_connected,
-        fps=fps,
+        is_running=False,
+        is_connected=False,
+        fps=0,
     )
 
 
@@ -60,11 +53,10 @@ def _camera_to_info(cam, stream_manager) -> CameraInfo:
 @router.get("/", response_model=List[CameraInfo])
 async def list_cameras(
     db: Session = Depends(get_db),
-    service: CameraService = Depends(get_camera_service),
 ):
     """列出所有已保存的摄像头"""
     cams = CameraDBService.list_cameras(db)
-    return [_camera_to_info(c, service.stream_manager) for c in cams]
+    return [_camera_to_info(c) for c in cams]
 
 
 @router.post("/", response_model=CameraInfo)
@@ -89,7 +81,7 @@ async def create_camera(
         "camera_type": payload.camera_type or "RTSP",
         "band_type": payload.band_type,
     })
-    return _camera_to_info(cam, service.stream_manager)
+    return _camera_to_info(cam)
 
 
 @router.patch("/{cam_id}", response_model=CameraInfo)
@@ -105,8 +97,8 @@ async def update_camera(
         raise HTTPException(status_code=404, detail="摄像头不存在")
     # URL 改变时强制重启流
     if payload.stream_url:
-        service.stream_manager.remove_camera(cam_id)
-    return _camera_to_info(cam, service.stream_manager)
+        await run_in_threadpool(service.stream_manager.remove_camera, cam_id)
+    return _camera_to_info(cam)
 
 
 @router.put("/{cam_id}/band", response_model=CameraInfo)
@@ -120,7 +112,23 @@ async def bind_camera_band(
     cam = CameraDBService.set_band(db, cam_id, payload.band_type)
     if not cam:
         raise HTTPException(status_code=400, detail="摄像头不存在或波段类型非法")
-    return _camera_to_info(cam, service.stream_manager)
+    return _camera_to_info(cam)
+
+
+@router.put("/{cam_id}/monitoring", response_model=CameraInfo)
+async def toggle_camera_monitoring(
+    cam_id: str,
+    db: Session = Depends(get_db),
+    service: CameraService = Depends(get_camera_service),
+):
+    """切换摄像头是否加入实时监控"""
+    cam = CameraDBService.get_camera(db, cam_id)
+    if not cam:
+        raise HTTPException(status_code=404, detail="摄像头不存在")
+    cam.is_monitoring = not getattr(cam, 'is_monitoring', True)
+    db.commit()
+    db.refresh(cam)
+    return _camera_to_info(cam)
 
 
 @router.delete("/{cam_id}")
@@ -130,7 +138,7 @@ async def delete_camera(
     service: CameraService = Depends(get_camera_service),
 ):
     """删除摄像头并停止其流"""
-    service.stream_manager.remove_camera(cam_id)
+    await run_in_threadpool(service.stream_manager.remove_camera, cam_id)
     ok = CameraDBService.delete_camera(db, cam_id)
     if not ok:
         raise HTTPException(status_code=404, detail="摄像头不存在")
@@ -186,7 +194,7 @@ async def add_from_scan(
         "password": rt.get("password"),
         "camera_type": cam.get("type") or "ONVIF",
     })
-    return _camera_to_info(created, service.stream_manager)
+    return _camera_to_info(created)
 
 
 @router.post("/sync")
@@ -200,7 +208,7 @@ async def sync_from_scan(
         raise HTTPException(status_code=400, detail="没有可用的扫描结果，请先扫描网络")
 
     # 停止现有流
-    service.stream_manager.stop_all()
+    await run_in_threadpool(service.stream_manager.stop_all)
 
     existing_cameras = CameraDBService.list_cameras(db)
     band_bindings = {
@@ -233,7 +241,7 @@ async def sync_from_scan(
     return {
         "success": True,
         "count": len(created),
-        "cameras": [_camera_to_info(c, service.stream_manager).model_dump() for c in created],
+        "cameras": [_camera_to_info(c).model_dump() for c in created],
     }
 
 
@@ -255,9 +263,9 @@ async def refresh_streams(
         if not cam or not cam.stream_url:
             continue
         # 先停掉旧流（会触发 MJPEG 生成器退出，浏览器旧连接关闭）
-        service.stream_manager.remove_camera(cam_id)
+        await run_in_threadpool(service.stream_manager.remove_camera, cam_id)
         # 立即重建新流（接下来的 MJPEG 请求会拿到全新 RTSP 连接）
-        if service.stream_manager.add_camera(cam_id, cam.stream_url):
+        if await run_in_threadpool(service.stream_manager.add_camera, cam_id, cam.stream_url):
             refreshed += 1
             print(f"[Stream] 刷新视频流: {cam_id} ({cam.name})")
 
@@ -276,7 +284,7 @@ async def stream_video(
     if not stream:
         cam = CameraDBService.get_camera(db, cam_id)
         if cam and cam.stream_url:
-            if service.stream_manager.add_camera(cam_id, cam.stream_url):
+            if await run_in_threadpool(service.stream_manager.add_camera, cam_id, cam.stream_url):
                 stream = service.stream_manager.get_stream(cam_id)
         if not stream:
             raise HTTPException(status_code=404, detail="Stream not found")
@@ -304,7 +312,7 @@ async def snapshot(
     if not stream:
         cam = CameraDBService.get_camera(db, cam_id)
         if cam and cam.stream_url:
-            if service.stream_manager.add_camera(cam_id, cam.stream_url):
+            if await run_in_threadpool(service.stream_manager.add_camera, cam_id, cam.stream_url):
                 stream = service.stream_manager.get_stream(cam_id)
         if not stream:
             raise HTTPException(status_code=404, detail="Stream not found")
@@ -350,7 +358,7 @@ async def streams_status(
     # 停掉不在窗口中的流
     for cid in list(service.stream_manager.get_all_streams().keys()):
         if cid not in active_ids:
-            service.stream_manager.remove_camera(cid)
+            await run_in_threadpool(service.stream_manager.remove_camera, cid)
             print(f"[Stream] 停止闲置视频流以降低延迟: {cid}")
 
     # 启动需要的流
@@ -358,8 +366,8 @@ async def streams_status(
         running = service.stream_manager.get_stream(cid) is not None
         cam = cam_map.get(cid)
         if not running and cam and cam.stream_url:
-            print(f"[Stream] 按需启动活动视频流: {cid}")
-            service.stream_manager.add_camera(cid, cam.stream_url)
+            if service.stream_manager.ensure_camera_async(cid, cam.stream_url):
+                print(f"[Stream] 后台启动活动视频流: {cid}")
 
     # 标记主窗口
     for cid, stream in service.stream_manager.get_all_streams().items():

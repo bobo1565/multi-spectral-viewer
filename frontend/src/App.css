@@ -106,13 +106,20 @@
     color: #999;
 }
 
-.tree-node-title .delete-btn {
+.tree-node-title .delete-btn,
+.tree-node-title .edit-btn {
     opacity: 0;
     transition: opacity 0.2s;
 }
 
-.image-tree .ant-tree-treenode:hover .delete-btn {
+.image-tree .ant-tree-treenode:hover .delete-btn,
+.image-tree .ant-tree-treenode:hover .edit-btn {
     opacity: 1;
+}
+
+.tree-node-title .rename-input {
+    width: 120px;
+    margin-right: 4px;
 }
 
 .channel-node {

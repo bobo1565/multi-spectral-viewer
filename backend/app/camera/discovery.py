@@ -161,7 +161,7 @@ class CameraDiscovery:
 
     def try_rtsp_url(self, ip: str, port: int, path: str,
                      username: str = "", password: str = "",
-                     timeout: int = 3) -> Optional[str]:
+                     timeout: int = 1) -> Optional[str]:
         """尝试连接RTSP URL - 使用线程防止卡死"""
         import cv2
 
@@ -173,6 +173,7 @@ class CameraDiscovery:
             url = f"rtsp://{ip}:{port}{path}"
 
         def try_connect():
+            cap = None
             try:
                 cap = cv2.VideoCapture(url)
                 cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout * 1000)
@@ -180,13 +181,13 @@ class CameraDiscovery:
 
                 if cap.isOpened():
                     ret, frame = cap.read()
-                    cap.release()
                     if ret and frame is not None and frame.size > 0:
                         result[0] = url
-                else:
-                    cap.release()
             except Exception:
                 pass
+            finally:
+                if cap is not None:
+                    cap.release()
 
         thread = threading.Thread(target=try_connect)
         thread.daemon = True
@@ -274,8 +275,9 @@ class CameraDiscovery:
 
         self.log(f"  {ip}:{port} 端口开放，尝试RTSP路径...")
 
+        # 1. 匿名尝试前 5 条路径
         for path in self.COMMON_RTSP_PATHS[:5]:
-            url = self.try_rtsp_url(ip, port, path, "", "", 2)
+            url = self.try_rtsp_url(ip, port, path, "", "", 1)
             if url:
                 self.log(f"  ✓ 发现RTSP流: {path}")
                 return {
@@ -291,11 +293,12 @@ class CameraDiscovery:
                     'port': port,
                 }
 
+        # 2. 凭据认证尝试前 8 条路径（限制组合数）
         credential_count = 0
         for cred in self.config.get('discovery', {}).get('common_credentials', []):
-            for path in self.COMMON_RTSP_PATHS:
+            for path in self.COMMON_RTSP_PATHS[:8]:
                 credential_count += 1
-                url = self.try_rtsp_url(ip, port, path, cred['username'], cred['password'], 2)
+                url = self.try_rtsp_url(ip, port, path, cred['username'], cred['password'], 1)
                 if url:
                     self.log(f"  ✓ 发现RTSP流(需认证): {path}")
                     return {

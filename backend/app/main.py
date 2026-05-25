@@ -50,6 +50,19 @@ async def startup_event():
     # 初始化数据库表
     Base.metadata.create_all(bind=engine)
 
+    # 自动迁移：为已有 cameras 表补充 is_monitoring 列
+    try:
+        from sqlalchemy import text, inspect as sa_inspect
+        inspector = sa_inspect(engine)
+        columns = [c['name'] for c in inspector.get_columns('cameras')]
+        if 'is_monitoring' not in columns:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE cameras ADD COLUMN is_monitoring INTEGER DEFAULT 1"))
+                conn.commit()
+            print("[Startup] 已为 cameras 表添加 is_monitoring 列")
+    except Exception as e:
+        print(f"[Startup] 添加 is_monitoring 列（表可能尚不存在）: {e}")
+
     # 初始化摄像头服务（StreamManager + CameraDiscovery 单例）
     camera_service = get_camera_service()
 

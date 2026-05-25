@@ -51,6 +51,8 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
         }
     }, []);
 
+    const monitoringCameras = useMemo(() => cameras.filter(c => c.is_monitoring !== false), [cameras]);
+
     const applyStreamStatuses = useCallback((statuses: StreamStatus[]) => {
         const map: Record<string, StreamStatus> = {};
         statuses.forEach(s => { map[s.camera_id] = s; });
@@ -98,10 +100,10 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
         };
     }, [pauseStreamRendering, resumeStreamRendering]);
 
-    // 轮询流状态 + 按需启停流
+    // 轮询流状态 + 按需启停流（仅管理监控中的摄像头）
     useEffect(() => {
-        if (cameras.length === 0) return;
-        const activeIds = cameras.map(c => c.id);
+        if (monitoringCameras.length === 0) return;
+        const activeIds = monitoringCameras.map(c => c.id);
 
         let cancelled = false;
         const poll = async () => {
@@ -116,7 +118,7 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
         poll();
         const h = setInterval(poll, STATUS_POLL_MS);
         return () => { cancelled = true; clearInterval(h); };
-    }, [applyStreamStatuses, cameras, mainId]);
+    }, [applyStreamStatuses, monitoringCameras, mainId]);
 
     useEffect(() => {
         if (maximizedCameraId && !cameras.some(cam => cam.id === maximizedCameraId)) {
@@ -132,7 +134,7 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
     };
 
     const selectAll = () => {
-        setSelectedIds(cameras.map(c => c.id));
+        setSelectedIds(monitoringCameras.map(c => c.id));
     };
 
     const clearSelection = () => {
@@ -196,17 +198,34 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
         }
     };
 
-    // 刷新流：先重启后端 RTSP 连接，再刷新前端 MJPEG 连接
+    // 刷新流：重启后端 RTSP → 即时同步在线状态 → 刷新前端 MJPEG
     const handleRefreshStreams = async () => {
-        const activeIds = cameras.map(c => c.id);
-        if (activeIds.length > 0) {
-            try {
-                await cameraApi.refreshStreams(activeIds);
-            } catch {
-                // 后端重启失败不阻断前端刷新
-            }
+        const activeIds = monitoringCameras.map(c => c.id);
+        if (activeIds.length === 0) return;
+
+        // 1. 重启后端 RTSP 连接
+        try {
+            await cameraApi.refreshStreams(activeIds);
+        } catch {
+            // 后端重启失败不阻断前端刷新
         }
-        resumeStreamRendering(true);
+
+        // 2. 立即同步流状态（触发后端启停流）
+        try {
+            const statuses = await cameraApi.streamsStatus(activeIds, mainId);
+            applyStreamStatuses(statuses);
+        } catch {
+            // 静默
+        }
+
+        // 3. 刷新前端 MJPEG 连接（递增 refreshKey 使浏览器重新建立连接）
+        setIsStreamRenderingEnabled(true);
+        setPreviewSessionKey(k => k + 1);
+        setRefreshKey(k => k + 1);
+
+        // 4. 重新加载摄像头列表（更新 is_connected 等）
+        void loadCameras();
+        message.success("已刷新视频流");
     };
 
     const handleSwapToMain = useCallback((cam_id: string) => {
@@ -214,7 +233,7 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
         // 因此无需重建 MJPEG 连接，从根本上规避切换大图时的黑屏问题
         setMainId(cam_id);
 
-        const activeIds = cameras.map(c => c.id);
+        const activeIds = monitoringCameras.map(c => c.id);
         if (activeIds.length > 0) {
             void cameraApi.streamsStatus(activeIds, cam_id)
                 .then(applyStreamStatuses)
@@ -222,7 +241,7 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
                     // 后续轮询会自动校正状态
                 });
         }
-    }, [applyStreamStatuses, cameras]);
+    }, [applyStreamStatuses, monitoringCameras]);
 
     const handleOpenMaximized = (cam_id: string) => {
         // 同时递增 previewSessionKey 和 refreshKey，确保 Modal 内的 img src 每次都是
@@ -243,7 +262,7 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
         const ordered: LiveTileItem[] = [];
 
         BAND_TYPES.forEach((band) => {
-            const cam = cameras.find(item => item.band_type === band && !usedIds.has(item.id));
+            const cam = monitoringCameras.find(item => item.band_type === band && !usedIds.has(item.id));
             if (cam) {
                 usedIds.add(cam.id);
                 ordered.push({ kind: 'camera', key: cam.id, camera: cam });
@@ -252,14 +271,14 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
             ordered.push({ kind: 'placeholder', key: `placeholder-${band}`, band });
         });
 
-        cameras.forEach((cam) => {
+        monitoringCameras.forEach((cam) => {
             if (!usedIds.has(cam.id)) {
                 ordered.push({ kind: 'camera', key: cam.id, camera: cam });
             }
         });
 
         return ordered;
-    }, [cameras]);
+    }, [monitoringCameras]);
 
     const visibleTileItems = useMemo(
         () => tileItems.slice(0, EXPECTED_CAMERA_COUNT),
@@ -399,7 +418,7 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
                 <div className="header-left">
                     <CameraOutlined />
                     <span>实时监控</span>
-                    <Tag>{`已配置 ${cameras.length}/${EXPECTED_CAMERA_COUNT} 台摄像头`}</Tag>
+                    <Tag>{`已配置 ${monitoringCameras.length}/${EXPECTED_CAMERA_COUNT} 台摄像头`}</Tag>
                     <Tag color="blue">已选 {selectedIds.length}</Tag>
                 </div>
 
@@ -412,7 +431,7 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
                         allowClear
                     />
                     <Space.Compact>
-                        <Button onClick={selectAll} disabled={cameras.length === 0}>全选</Button>
+                        <Button onClick={selectAll} disabled={monitoringCameras.length === 0}>全选</Button>
                         <Button onClick={clearSelection} disabled={selectedIds.length === 0}>清空</Button>
                     </Space.Compact>
                     <Button
@@ -427,8 +446,8 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
                     <Button
                         icon={<CameraOutlined />}
                         loading={capturing}
-                        disabled={cameras.length === 0}
-                        onClick={() => runCapture(cameras.map(c => c.id))}
+                        disabled={monitoringCameras.length === 0}
+                        onClick={() => runCapture(monitoringCameras.map(c => c.id))}
                     >
                         抓拍全部
                     </Button>
