@@ -232,5 +232,5 @@ export const batchService = {
     }
 };
 
-export { api };
+export { api, API_BASE };
 

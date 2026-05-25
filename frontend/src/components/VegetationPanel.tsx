@@ -5,6 +5,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Card, Select, Button, Row, Col, Statistic, Divider, Tag, message, Modal, Input, Slider, Radio } from 'antd';
 import { vegetationService } from '../services/api';
 import { batchService } from '../services/api';
+import { API_BASE } from '../services/api';
 import type { ImageInfo, VegetationIndexInfo, BatchInfo } from '../types';
 import { BAND_TYPES, BAND_LABELS } from '../types';
 import './VegetationPanel.css';
@@ -83,12 +84,12 @@ export default function VegetationPanel({ images, batches, batchId, onBlendedIma
         BAND_TYPES.forEach(bt => {
             const img = batch.aligned_images?.[bt];
             if (img) {
-                const fullUrl = img.url.startsWith('http') ? img.url : `http://localhost:8000${img.url}`;
+                const fullUrl = img.url.startsWith('http') ? img.url : `${API_BASE}${img.url}`;
                 options.push({ key: `aligned-${bt}`, label: `[Aligned] ${BAND_LABELS[bt]}`, url: fullUrl });
             }
         });
         (batch.generated_images || []).forEach(gImg => {
-            const fullUrl = gImg.url.startsWith('http') ? gImg.url : `http://localhost:8000${gImg.url}`;
+            const fullUrl = gImg.url.startsWith('http') ? gImg.url : `${API_BASE}${gImg.url}`;
             options.push({ key: `gen-${gImg.id}`, label: `[Generated] ${gImg.filename}`, url: fullUrl });
         });
         return options;
@@ -205,7 +206,7 @@ export default function VegetationPanel({ images, batches, batchId, onBlendedIma
             if (data.result_url.startsWith('http')) {
                 fullUrl = data.result_url;
             } else {
-                fullUrl = `http://localhost:8000${data.result_url}`;
+                fullUrl = `${API_BASE}${data.result_url}`;
             }
             console.log('Result Full URL:', fullUrl);
             setResult({
@@ -423,7 +424,7 @@ export default function VegetationPanel({ images, batches, batchId, onBlendedIma
                 />
             </Modal>
 
-            {result && (
+            {result && result.stats && (
                 <>
                     <Divider>统计结果</Divider>
                     <Row gutter={16}>

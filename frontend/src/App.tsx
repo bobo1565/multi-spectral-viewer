@@ -860,26 +860,30 @@ function App() {
 
     // 抓拍成功后：刷新批次列表并跳转到分析视图、选中新批次
     const handleCaptureSuccess = async (newBatchId: string) => {
-        const data = await batchService.listBatches();
-        setBatches(data);
-        const newBatch = data.find(b => b.id === newBatchId);
-        if (newBatch) {
-            const sourceImgs = newBatch.source_images || newBatch.images || ({} as Record<string, BatchImageInfo | null>);
-            // 优先选 rgb, 没有则选第一个可用波段
-            const firstBand = (['rgb', ...BAND_TYPES.filter(b => b !== 'rgb')] as BandType[])
-                .find(b => sourceImgs[b]);
-            if (firstBand && sourceImgs[firstBand]) {
-                setSelectedNode({
-                    batchId: newBatch.id,
-                    bandType: firstBand,
-                    channel: 'rgb',
-                    image: _adaptBatchImage(sourceImgs[firstBand]),
-                    imageType: 'source',
-                });
+        try {
+            const data = await batchService.listBatches();
+            setBatches(data);
+            const newBatch = data.find(b => b.id === newBatchId);
+            if (newBatch) {
+                const sourceImgs = newBatch.source_images || newBatch.images || ({} as Record<string, BatchImageInfo | null>);
+                const firstBand = (['rgb', ...BAND_TYPES.filter(b => b !== 'rgb')] as BandType[])
+                    .find(b => sourceImgs[b]);
+                if (firstBand && sourceImgs[firstBand]) {
+                    setSelectedNode({
+                        batchId: newBatch.id,
+                        bandType: firstBand,
+                        channel: 'rgb',
+                        image: _adaptBatchImage(sourceImgs[firstBand]),
+                        imageType: 'source',
+                    });
+                }
+                setExpandedKeys(prev => Array.from(new Set([...prev, newBatch.id, `${newBatch.id}-source`])));
             }
-            setExpandedKeys(prev => Array.from(new Set([...prev, newBatch.id, `${newBatch.id}-source`])));
+            setView('analysis');
+        } catch (error) {
+            console.error('[handleCaptureSuccess] failed', error);
+            setView('analysis');
         }
-        setView('analysis');
     };
 
     return (

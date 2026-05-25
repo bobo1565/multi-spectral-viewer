@@ -5,6 +5,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Card, Spin } from 'antd';
 import { ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined } from '@ant-design/icons';
 import type { ImageInfo } from '../types';
+import { API_BASE } from '../services/api';
 import './ImageViewer.css';
 
 type ChannelType = 'rgb' | 'r' | 'g' | 'b';
@@ -77,6 +78,15 @@ export default function ImageViewer({
 
     // 防抖计时器用于直方图计算
     const histogramTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // 像素值更新节流
+    const lastPixelUpdateRef = useRef(0);
+
+    // 组件卸载时清理定时器
+    useEffect(() => {
+        return () => {
+            if (histogramTimerRef.current) clearTimeout(histogramTimerRef.current);
+        };
+    }, []);
 
     // 将视图重置为适应容器
     const emitTransform = useCallback((nextScale: number, nextOffset: { x: number; y: number }) => {
@@ -121,8 +131,8 @@ export default function ImageViewer({
         } else if (image) {
             setProcessedUrl(null);
             const imageUrl = image.url
-                ? `http://localhost:8000${image.url}`
-                : `http://localhost:8000/api/images/${image.id}`;
+                ? `${API_BASE}${image.url}`
+                : `${API_BASE}/api/images/${image.id}`;
             loadImageUrl(imageUrl);
         } else {
             setProcessedUrl(null);
@@ -308,9 +318,9 @@ export default function ImageViewer({
             dstData[i + 3] = a;
 
             // 统计直方图
-            histR[Math.round(r)]++;
-            histG[Math.round(g)]++;
-            histB[Math.round(b)]++;
+            histR[Math.min(255, Math.round(r))]++;
+            histG[Math.min(255, Math.round(g))]++;
+            histB[Math.min(255, Math.round(b))]++;
         }
 
         imageDataRef.current = newImageData; // 更新当前显示用的数据用于像素拾取
@@ -412,6 +422,11 @@ export default function ImageViewer({
 
         if (x >= 0 && x < displayWidth && y >= 0 && y < displayHeight) {
             onPixelHover?.(x, y);
+
+            // 节流像素值更新（~30fps）
+            const now = performance.now();
+            if (now - lastPixelUpdateRef.current < 33) return;
+            lastPixelUpdateRef.current = now;
 
             // 读取像素值
             if (imageDataRef.current) {

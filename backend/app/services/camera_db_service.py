@@ -137,11 +137,16 @@ class CameraDBService:
             ).first()
             if conflict:
                 conflict.band_type = cam.band_type
+                db.refresh(conflict)
             cam.band_type = band_type
         else:
             return None
-        db.commit()
-        db.refresh(cam)
+        try:
+            db.commit()
+            db.refresh(cam)
+        except Exception:
+            db.rollback()
+            raise
         return cam
 
     @staticmethod

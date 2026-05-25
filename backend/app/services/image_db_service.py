@@ -22,15 +22,19 @@ class ImageDBService:
             image_type=image_data.get("image_type", "source"),  # 图像类型：source 或 aligned
             filename=image_data["filename"], # 原始文件名
             filepath=image_data["filepath"],
-            file_size=image_data["size"],
+            file_size=image_data.get("size") or image_data.get("file_size", 0),
             width=image_data["width"],
             height=image_data["height"],
             channels=image_data["channels"],
             upload_time=image_data.get("upload_time", datetime.utcnow())
         )
         db.add(db_image)
-        db.commit()
-        db.refresh(db_image)
+        try:
+            db.commit()
+            db.refresh(db_image)
+        except Exception:
+            db.rollback()
+            raise
         return db_image
 
     @staticmethod

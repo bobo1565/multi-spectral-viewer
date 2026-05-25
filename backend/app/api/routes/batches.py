@@ -112,7 +112,10 @@ async def delete_batch(batch_id: str, db: Session = Depends(get_db)):
     # 删除批次中所有图像的物理文件
     all_images = BatchDBService.get_all_batch_images_list(db, batch_id)
     for img in all_images:
-        file_manager.delete_file(img.id)
+        try:
+            file_manager.delete_file(img.id)
+        except Exception as e:
+            print(f"[BatchDelete] 物理文件删除失败 {img.id}: {e}")
     
     # 删除批次（会级联删除数据库中的图像记录）
     BatchDBService.delete_batch(db, batch_id)
@@ -138,7 +141,10 @@ async def delete_batch_images_by_type(batch_id: str, image_type: str, db: Sessio
             'generated' if '/generated/' in img.filepath else 'source'))
         if current_type == image_type:
             # 物理文件删除
-            file_manager.delete_file(img.id)
+            try:
+                file_manager.delete_file(img.id)
+            except Exception as e:
+                print(f"[BatchDelete] 物理文件删除失败 {img.id}: {e}")
             # 数据库记录删除
             ImageDBService.delete_image(db, img.id)
             deleted_count += 1
@@ -248,7 +254,7 @@ async def add_generated_image(
         raise HTTPException(status_code=404, detail="批次不存在")
     
     image_id = str(_uuid.uuid4())
-    safe_name = filename.replace(" ", "_").replace("/", "_")
+    safe_name = os.path.basename(filename).replace(" ", "_")
     dest_filename = f"{image_id}_{safe_name}"
     dest_path = os.path.join(UPLOAD_DIR, "original", dest_filename)
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)

@@ -15,6 +15,9 @@ import numpy as np
 class CameraStream:
     """单个摄像头的视频流处理"""
 
+    # 黑帧判定阈值：帧均值低于此值视为黑帧
+    BLACK_FRAME_MEAN_THRESHOLD = 5
+
     def __init__(self, camera_id: str, rtsp_url: str, config: Dict):
         self.camera_id = camera_id
         self.rtsp_url = rtsp_url
@@ -31,7 +34,8 @@ class CameraStream:
         self.frame_count = 0
         self.last_fps_time = time.time()
         self.error_count = 0
-        self.last_frame_time = 0
+        self.last_frame_time = time.time()
+        self.black_frame_count = 0
 
         self.frame_buffer = deque(maxlen=config.get('buffer_size', 2))
 
@@ -62,11 +66,11 @@ class CameraStream:
             self.capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
             self.capture_thread.start()
 
-            # 等待第一帧
+            # 等待第一帧（非黑帧）
             wait_start = time.time()
-            while time.time() - wait_start < 5:
+            while time.time() - wait_start < 8:
                 with self.frame_lock:
-                    if self.frame is not None:
+                    if self.frame is not None and self.frame.mean() >= self.BLACK_FRAME_MEAN_THRESHOLD:
                         self.is_connected = True
                         print(f"[Stream {self.camera_id}] 连接成功")
                         return True
@@ -92,15 +96,21 @@ class CameraStream:
         """视频捕获线程"""
         consecutive_errors = 0
         max_consecutive_errors = 10
+        consecutive_black = 0
+        max_consecutive_black = 60
 
         while self.is_running:
             try:
+                ret = False
+                frame = None
+                cap_ok = False
+
                 with self.cap_lock:
                     if self.cap is None or not self.cap.isOpened():
                         cap_ok = False
                     else:
                         ret, frame = self.cap.read()
-                        cap_ok = True
+                        cap_ok = ret and frame is not None
 
                 if not cap_ok:
                     consecutive_errors += 1
@@ -111,13 +121,24 @@ class CameraStream:
                     time.sleep(0.5)
                     continue
 
-                if not ret or frame is None:
-                    consecutive_errors += 1
-                    time.sleep(0.01)
-                    continue
-
                 consecutive_errors = 0
                 self.error_count = 0
+
+                # 检测黑帧：H.264 解码器在未收到关键帧时会产生全黑帧
+                if frame.mean() < self.BLACK_FRAME_MEAN_THRESHOLD:
+                    consecutive_black += 1
+                    self.black_frame_count += 1
+                    if consecutive_black == 1:
+                        print(f"[Stream {self.camera_id}] 检测到黑帧，保留上一帧（可能是H.264解码器未同步）")
+                    if consecutive_black >= max_consecutive_black:
+                        print(f"[Stream {self.camera_id}] 连续 {consecutive_black} 帧为黑帧，尝试重连...")
+                        self._reconnect()
+                        consecutive_black = 0
+                    # 黑帧不更新 self.frame，保留最后一个有效帧
+                    time.sleep(0.033)
+                    continue
+
+                consecutive_black = 0
 
                 with self.frame_lock:
                     self.frame = frame
@@ -144,6 +165,7 @@ class CameraStream:
 
     def _reconnect(self):
         """重新连接"""
+        self.is_connected = False
         try:
             with self.cap_lock:
                 if self.cap:
@@ -190,6 +212,7 @@ class CameraStream:
             'is_connected': self.is_connected and frame_age < 5,
             'fps': self.fps,
             'error_count': self.error_count,
+            'black_frame_count': self.black_frame_count,
             'frame_age': frame_age,
             'rtsp_url': self.rtsp_url,
         }
@@ -212,6 +235,7 @@ class StreamManager:
     def __init__(self, config: Dict):
         self.config = config
         self.streams: Dict[str, CameraStream] = {}
+        self.starting: Dict[str, str] = {}
         self.lock = threading.Lock()
 
     def add_camera(self, camera_id: str, rtsp_url: str) -> bool:
@@ -242,6 +266,27 @@ class StreamManager:
 
             self.streams[camera_id] = stream
             return True
+
+    def ensure_camera_async(self, camera_id: str, rtsp_url: str) -> bool:
+        """后台确保摄像头流存在，避免状态轮询阻塞 API 事件循环。"""
+        with self.lock:
+            current = self.streams.get(camera_id)
+            if current is not None and current.rtsp_url == rtsp_url:
+                return False
+            if self.starting.get(camera_id) == rtsp_url:
+                return False
+            self.starting[camera_id] = rtsp_url
+
+        def _start():
+            try:
+                self.add_camera(camera_id, rtsp_url)
+            finally:
+                with self.lock:
+                    if self.starting.get(camera_id) == rtsp_url:
+                        del self.starting[camera_id]
+
+        threading.Thread(target=_start, daemon=True).start()
+        return True
 
     def remove_camera(self, camera_id: str):
         """移除摄像头"""
@@ -299,7 +344,7 @@ def generate_mjpeg(stream: CameraStream, quality: int = 70):
     no_frame_count = 0
     # 帧率限制：30 FPS ≈ 33ms 间隔
     target_interval = 1.0 / 30
-    last_yield_time = 0.0
+    last_yield_time = time.time()
 
     while stream.is_running:
         now = time.time()
