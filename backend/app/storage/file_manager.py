@@ -29,6 +29,84 @@ class FileManager:
         self.processed_dir.mkdir(exist_ok=True)
         self.temp_dir.mkdir(exist_ok=True)
     
+    def save_uploaded_raw_file(
+        self,
+        file_content: bytes,
+        filename: str,
+        width: int,
+        height: int,
+        bit_depth: int = 8,
+        channels: int = 1,
+        byte_order: str = "little"
+    ) -> dict:
+        """
+        保存无文件头的 RAW 图像，解码后保存为 TIFF
+
+        Args:
+            file_content: RAW 文件二进制内容
+            filename: 原始文件名
+            width: 图像宽度
+            height: 图像高度
+            bit_depth: 位深 (8 或 16)
+            channels: 通道数 (1=灰度, 3=RGB)
+            byte_order: 字节序 ("little" 或 "big")
+        """
+        file_id = str(uuid.uuid4())
+        safe_filename = os.path.basename(filename).replace(" ", "_")
+
+        bytes_per_pixel = 2 if bit_depth == 12 else bit_depth // 8
+        expected_size = width * height * channels * bytes_per_pixel
+        actual_size = len(file_content)
+        if actual_size != expected_size:
+            raise ValueError(
+                f"RAW 文件大小不匹配: 期望 {expected_size} 字节 "
+                f"({width}x{height}x{channels}x{bytes_per_pixel}B), "
+                f"实际 {actual_size} 字节"
+            )
+
+        # 用 numpy 解码
+        if bit_depth == 8:
+            dtype = np.uint8
+        elif bit_depth == 12:
+            dtype = '>u2' if byte_order == "big" else '<u2'
+        else:
+            dtype = '>u2' if byte_order == "big" else '<u2'
+
+        flat = np.frombuffer(file_content, dtype=dtype)
+
+        if channels == 1:
+            img = flat.reshape((height, width))
+        else:
+            img = flat.reshape((height, width, channels))
+
+        # 12-bit/16-bit 数据按 16-bit 存储，保留原始精度
+        if bit_depth in (12, 16):
+            img = img.astype(np.uint16)
+
+        # 保存为 TIFF（保留完整精度）
+        tiff_filename = os.path.splitext(safe_filename)[0] + ".tiff"
+        new_filename = f"{file_id}_{tiff_filename}"
+        filepath = self.original_dir / new_filename
+
+        success = cv2.imwrite(str(filepath), img)
+        if not success:
+            if filepath.exists():
+                filepath.unlink()
+            raise ValueError(f"无法将 RAW 文件解码保存为 TIFF: {filename}")
+
+        size = filepath.stat().st_size
+
+        return {
+            "id": file_id,
+            "filename": tiff_filename,
+            "filepath": str(filepath),
+            "size": size,
+            "width": width,
+            "height": height,
+            "channels": channels if channels > 1 else 1,
+            "upload_time": datetime.now()
+        }
+
     def save_uploaded_file(self, file_content: bytes, filename: str) -> dict:
         """
         保存上传的文件

@@ -2,6 +2,7 @@
 批次管理API路由
 """
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form
+import json
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import os
@@ -19,15 +20,26 @@ from app.services.image_db_service import ImageDBService
 router = APIRouter()
 
 
+def _build_image_url(img) -> str:
+    """从数据库字段构建图片URL，避免跨文件系统时os.path.relpath产生路径遍历"""
+    filepath = img.filepath
+    # 如果文件在当前 UPLOAD_DIR 下，直接用相对路径
+    if os.path.exists(filepath) and os.path.commonpath([filepath, UPLOAD_DIR]) == UPLOAD_DIR:
+        return f"/uploads/{os.path.relpath(filepath, UPLOAD_DIR)}"
+    # 跨文件系统：用 batch_id + image_type + filename 构造路径
+    img_type = getattr(img, 'image_type', None) or 'source'
+    if img_type == 'generated':
+        return f"/uploads/original/{img.id}_{img.filename}"
+    return f"/uploads/{img.batch_id}/{img_type}/{img.filename}"
+
+
 def _image_to_batch_image_info(img) -> Optional[BatchImageInfo]:
     """将数据库图像模型转换为BatchImageInfo"""
     if img is None:
         return None
-    
-    rel_path = os.path.relpath(img.filepath, UPLOAD_DIR)
-    url = f"/uploads/{rel_path}"
-    print(f"[BatchImageInfo] filepath={img.filepath}, rel_path={rel_path}, url={url}")
-    
+
+    url = _build_image_url(img)
+
     return BatchImageInfo(
         id=img.id,
         band_type=img.band_type or "",
@@ -160,6 +172,11 @@ async def import_batch_images(
     band_650nm: Optional[UploadFile] = File(None),
     band_730nm: Optional[UploadFile] = File(None),
     band_850nm: Optional[UploadFile] = File(None),
+    raw_params_rgb: Optional[str] = Form(None),
+    raw_params_570nm: Optional[str] = Form(None),
+    raw_params_650nm: Optional[str] = Form(None),
+    raw_params_730nm: Optional[str] = Form(None),
+    raw_params_850nm: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     """导入图像到批次"""
@@ -167,8 +184,8 @@ async def import_batch_images(
     if not batch:
         raise HTTPException(status_code=404, detail="批次不存在")
     
-    allowed_extensions = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-    
+    allowed_extensions = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".raw"}
+
     # 映射文件到波段
     files_map = {
         "rgb": rgb,
@@ -177,29 +194,63 @@ async def import_batch_images(
         "730nm": band_730nm,
         "850nm": band_850nm
     }
-    
+
+    # RAW 参数映射
+    raw_params_map = {
+        "rgb": raw_params_rgb,
+        "570nm": raw_params_570nm,
+        "650nm": raw_params_650nm,
+        "730nm": raw_params_730nm,
+        "850nm": raw_params_850nm,
+    }
+
     for band_type, file in files_map.items():
         if file is None or file.filename == "":
             continue
-            
+
         ext = os.path.splitext(file.filename)[1].lower()
         if ext not in allowed_extensions:
             raise HTTPException(
                 status_code=400,
                 detail=f"{band_type} 文件格式不支持。支持的格式: {', '.join(allowed_extensions)}"
             )
-        
+
         try:
             content = await file.read()
-            file_info = file_manager.save_uploaded_file(content, file.filename)
-            
+
+            if ext == ".raw":
+                # 解析 RAW 参数
+                raw_json = raw_params_map.get(band_type)
+                if not raw_json:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{band_type} 是 RAW 文件，但未提供 RAW 参数"
+                    )
+                try:
+                    params = json.loads(raw_json)
+                except json.JSONDecodeError:
+                    raise HTTPException(status_code=400, detail=f"{band_type} RAW 参数 JSON 格式无效")
+
+                file_info = file_manager.save_uploaded_raw_file(
+                    content, file.filename,
+                    width=params["width"],
+                    height=params["height"],
+                    bit_depth=params.get("bit_depth", 8),
+                    channels=params.get("channels", 1),
+                    byte_order=params.get("byte_order", "little")
+                )
+            else:
+                file_info = file_manager.save_uploaded_file(content, file.filename)
+
             # 保存到数据库，添加批次和波段信息
             file_info["batch_id"] = batch_id
             file_info["band_type"] = band_type
             ImageDBService.create_image(db, file_info)
-            
+
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"{band_type} 文件上传失败: {str(e)}")
     
@@ -285,7 +336,7 @@ async def add_generated_image(
         band_type=db_img.band_type or "generated",
         filename=db_img.filename,
         filepath=db_img.filepath,
-        url=f"/uploads/{os.path.relpath(db_img.filepath, UPLOAD_DIR)}",
+        url=_build_image_url(db_img),
         size=db_img.file_size,
         width=db_img.width,
         height=db_img.height,

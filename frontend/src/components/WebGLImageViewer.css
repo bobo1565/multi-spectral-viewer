@@ -1,0 +1,150 @@
+/* WebGL 图像查看器样式 */
+
+.webgl-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #1a1a2e;
+}
+
+.webgl-viewer.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.webgl-viewer .placeholder {
+  color: #666;
+  font-size: 16px;
+  user-select: none;
+}
+
+/* 顶部栏 */
+.viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #16213e;
+  border-bottom: 1px solid #0f3460;
+  color: #e0e0e0;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.viewer-header .channel-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  background: #0f3460;
+  color: #64b5f6;
+}
+
+.viewer-header .zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.viewer-header .zoom-controls button {
+  width: 28px;
+  height: 28px;
+  border: 1px solid #0f3460;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.viewer-header .zoom-controls button:hover {
+  background: #0f3460;
+}
+
+.viewer-header .zoom-controls span {
+  min-width: 48px;
+  text-align: center;
+  font-size: 12px;
+  color: #999;
+}
+
+/* 查看器容器 */
+.webgl-viewer .viewer-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #1a1a2e;
+  cursor: crosshair;
+}
+
+.webgl-viewer .viewer-container:active {
+  cursor: grabbing;
+}
+
+.webgl-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* 加载动画 */
+.webgl-viewer .loading-spin {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10;
+}
+
+/* 像素状态栏 */
+.webgl-viewer .pixel-status-bar {
+  display: flex;
+  align-items: center;
+  padding: 4px 12px;
+  background: #16213e;
+  border-top: 1px solid #0f3460;
+  font-size: 12px;
+  color: #999;
+  flex-shrink: 0;
+  gap: 8px;
+  user-select: none;
+}
+
+.webgl-viewer .pixel-status-bar .info-item {
+  white-space: nowrap;
+}
+
+.webgl-viewer .pixel-status-bar .divider {
+  color: #333;
+}
+
+.webgl-viewer .pixel-status-bar .coord {
+  color: #64b5f6;
+  font-family: monospace;
+}
+
+.webgl-viewer .pixel-status-bar .pixel-rgb {
+  display: flex;
+  gap: 8px;
+  font-family: monospace;
+}
+
+.webgl-viewer .pixel-status-bar .pixel-rgb .r { color: #ef5350; }
+.webgl-viewer .pixel-status-bar .pixel-rgb .g { color: #66bb6a; }
+.webgl-viewer .pixel-status-bar .pixel-rgb .b { color: #42a5f5; }
+
+.webgl-viewer .pixel-status-bar .pixel-gray {
+  color: #e0e0e0;
+  font-family: monospace;
+}
+
+.webgl-viewer .pixel-status-bar .hint {
+  color: #555;
+}

@@ -8,7 +8,7 @@ import type { DataNode } from 'antd/es/tree';
 import { batchService, imageService, alignmentService } from './services/api';
 import type { BatchInfo, BandType, ImageInfo, BatchImageInfo } from './types';
 import { BAND_TYPES, BAND_LABELS } from './types';
-import { ImageViewer, ToolPanel, BlendPanel, VegetationPanel, AlignmentPanel, BatchImportDialog, LivePanel, CameraManager } from './components';
+import { WebGLImageViewer, ToolPanel, BlendPanel, VegetationPanel, AlignmentPanel, BatchImportDialog, LivePanel, CameraManager } from './components';
 import ROICanvas, { type ROICoords } from './components/ROICanvas';
 import SAM2ClickCanvas from './components/SAM2ClickCanvas';
 import './App.css';
@@ -18,7 +18,7 @@ type AppView = 'analysis' | 'live' | 'cameras';
 const { Header, Content, Sider } = Layout;
 
 // 通道类型
-type ChannelType = 'rgb' | 'r' | 'g' | 'b';
+type ChannelType = 'rgb' | 'r' | 'g' | 'b' | 'tiff';
 
 interface SelectedNode {
     batchId: string;
@@ -40,6 +40,15 @@ function _adaptBatchImage(img: any): ImageInfo {
         channels: img.channels,
         upload_time: img.upload_time
     };
+}
+
+function _isTiffImage(img?: { filename?: string } | null): boolean {
+    const filename = img?.filename?.toLowerCase() || '';
+    return filename.endsWith('.tif') || filename.endsWith('.tiff');
+}
+
+function _defaultChannelForImage(img?: { filename?: string } | null): ChannelType {
+    return _isTiffImage(img) ? 'tiff' : 'rgb';
 }
 
 function App() {
@@ -119,7 +128,6 @@ function App() {
     const [colormap, setColormap] = useState('gray'); // 色带
     const [whiteBalance, setWhiteBalance] = useState({ r: 1, g: 1, b: 1 }); // 白平衡
     const [saturation, setSaturation] = useState(1); // 饱和度
-    const [histogram, setHistogram] = useState<{ r: number[], g: number[], b: number[] } | null>(null); // 直方图
 
     // 拖拽调整大小状态
     const [leftWidth, setLeftWidth] = useState(280);
@@ -375,7 +383,12 @@ function App() {
                                 key: `${nodeKey}-b`,
                                 title: <span className="sub-channel-node">B 通道 (灰度)</span>,
                                 isLeaf: true,
-                            }
+                            },
+                            ...(_isTiffImage(img) ? [{
+                                key: `${nodeKey}-tiff`,
+                                title: <span className="sub-channel-node">TIFF 灰度</span>,
+                                isLeaf: true,
+                            }] : [])
                         ]
                     };
                 }
@@ -634,7 +647,7 @@ function App() {
                 setSelectedNode({
                     batchId: batch.id,
                     bandType: 'rgb',
-                    channel: 'rgb',
+                    channel: _defaultChannelForImage(img),
                     image: _adaptBatchImage(img),
                     imageType: 'source'
                 });
@@ -673,7 +686,7 @@ function App() {
                     setSelectedNode({
                         batchId: matchedBatch.id,
                         bandType: 'rgb',
-                        channel: 'rgb',
+                        channel: _defaultChannelForImage(genImgs[0]),
                         image: _adaptBatchImage(genImgs[0]),
                         imageType: 'generated'
                     });
@@ -688,7 +701,7 @@ function App() {
                 setSelectedNode({
                     batchId: matchedBatch.id,
                     bandType: 'rgb',
-                    channel: 'rgb',
+                    channel: _defaultChannelForImage(genImg),
                     image: _adaptBatchImage(genImg),
                     imageType: 'generated'
                 });
@@ -709,7 +722,7 @@ function App() {
                 setSelectedNode({
                     batchId: matchedBatch.id,
                     bandType: 'rgb',
-                    channel: 'rgb',
+                    channel: _defaultChannelForImage(img),
                     image: _adaptBatchImage(img),
                     imageType: folderType
                 });
@@ -730,14 +743,14 @@ function App() {
             setSelectedNode({
                 batchId: matchedBatch.id,
                 bandType: bandType,
-                channel: 'rgb',
+                channel: _defaultChannelForImage(img),
                 image: img ? _adaptBatchImage(img) : null,
                 imageType: folderType
             });
         } else if (parts.length === 3) {
             // Selected Leaf Node (e.g. Source -> RGB -> R Channel)
             const channel = parts[2] as ChannelType;
-            if (['rgb', 'r', 'g', 'b'].includes(channel)) {
+            if (['rgb', 'r', 'g', 'b', 'tiff'].includes(channel)) {
                 setSelectedNode({
                     batchId: matchedBatch.id,
                     bandType: bandType,
@@ -796,7 +809,7 @@ function App() {
                     onWhiteBalanceChange={setWhiteBalance}
                     saturation={saturation}
                     onSaturationChange={setSaturation}
-                    histogram={histogram}
+                    histogram={null}
                 />
             ),
         },
@@ -872,7 +885,7 @@ function App() {
                     setSelectedNode({
                         batchId: newBatch.id,
                         bandType: firstBand,
-                        channel: 'rgb',
+                        channel: _defaultChannelForImage(sourceImgs[firstBand]),
                         image: _adaptBatchImage(sourceImgs[firstBand]),
                         imageType: 'source',
                     });
@@ -962,7 +975,7 @@ function App() {
 
                 {/* 中间图像查看器 */}
                 <Content className="viewer-content" style={{ position: 'relative' }}>
-                    <ImageViewer
+                    <WebGLImageViewer
                         image={selectedNode?.image || null}
                         blendedUrl={blendedImageUrl}
                         layers={(() => {
@@ -988,10 +1001,11 @@ function App() {
                         })()}
                         channel={selectedNode?.channel || 'rgb'}
                         colormap={colormap}
-                        whiteBalance={whiteBalance}
-                        saturation={saturation}
-                        onHistogramChange={setHistogram}
-                        onPixelHover={(roiDrawMode || sam2ClickMode) ? undefined : handlePixelHover}
+                        onPixelValue={(pixel) => {
+                            if (!roiDrawMode && !sam2ClickMode) {
+                                handlePixelHover(pixel.x, pixel.y);
+                            }
+                        }}
                         onTransformChange={setViewerTransform}
                     >
                         {roiDrawMode && (
@@ -1039,7 +1053,7 @@ function App() {
                                 loading={sam2Loading}
                             />
                         )}
-                    </ImageViewer>
+                    </WebGLImageViewer>
                 </Content>
 
                 <div

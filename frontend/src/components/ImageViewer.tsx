@@ -8,7 +8,26 @@ import type { ImageInfo } from '../types';
 import { API_BASE } from '../services/api';
 import './ImageViewer.css';
 
-type ChannelType = 'rgb' | 'r' | 'g' | 'b';
+function sanitizeUrlPath(url: string): string {
+  try {
+    const u = new URL(url);
+    const parts: string[] = [];
+    for (const seg of u.pathname.split('/')) {
+      if (seg === '' || seg === '.') continue;
+      if (seg === '..') {
+        parts.pop();
+      } else {
+        parts.push(seg);
+      }
+    }
+    u.pathname = '/' + parts.join('/');
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+type ChannelType = 'rgb' | 'r' | 'g' | 'b' | 'tiff';
 
 interface PixelValue {
     x: number;
@@ -130,14 +149,19 @@ export default function ImageViewer({
             loadImageUrl(blendedUrl);
         } else if (image) {
             setProcessedUrl(null);
-            const imageUrl = image.url
-                ? `${API_BASE}${image.url}`
-                : `${API_BASE}/api/images/${image.id}`;
+            let imageUrl: string;
+            if (channel === 'tiff' && image.filename?.toLowerCase().endsWith('.tiff')) {
+                imageUrl = `${API_BASE}/api/images/${image.id}/tiff-preview`;
+            } else {
+                imageUrl = image.url
+                    ? sanitizeUrlPath(`${API_BASE}${image.url}`)
+                    : `${API_BASE}/api/images/${image.id}`;
+            }
             loadImageUrl(imageUrl);
         } else {
             setProcessedUrl(null);
         }
-    }, [image?.id, image?.url, blendedUrl]);
+    }, [image?.id, image?.url, image?.filename, blendedUrl, channel]);
 
     // 图片加载完成且尺寸就绪后，重置视图
     useEffect(() => {
@@ -291,7 +315,12 @@ export default function ImageViewer({
             let a = srcData[i + 3];
 
             // 1. 提取通道
-            if (channel !== 'rgb') {
+            if (channel === 'tiff') {
+                // TIFF 预览已由后端归一化，取灰度值
+                const value = Math.round(0.299 * srcData[i] + 0.587 * srcData[i + 1] + 0.114 * srcData[i + 2]);
+                const [cr, cg, cb] = applyColormap(value, colormap);
+                r = cr; g = cg; b = cb;
+            } else if (channel !== 'rgb') {
                 const channelIndex = channel === 'r' ? 0 : channel === 'g' ? 1 : 2;
                 const value = srcData[i + channelIndex];
                 // 应用色带
@@ -441,6 +470,16 @@ export default function ImageViewer({
                         g: data[idx + 1],
                         b: data[idx + 2]
                     });
+                } else if (channel === 'tiff') {
+                    const od = originData;
+                    const grayValue = od ? Math.round(0.299 * od[idx] + 0.587 * od[idx + 1] + 0.114 * od[idx + 2]) : 0;
+                    setPixelValue({
+                        x, y,
+                        r: data[idx],
+                        g: data[idx + 1],
+                        b: data[idx + 2],
+                        gray: grayValue
+                    });
                 } else {
                     let grayValue = 0;
                     if (originData) {
@@ -478,6 +517,7 @@ export default function ImageViewer({
         r: 'R 通道 (灰度)',
         g: 'G 通道 (灰度)',
         b: 'B 通道 (灰度)',
+        tiff: 'TIFF 灰度',
     }[channel];
 
     // 当只有 blendedUrl 时的显示标题

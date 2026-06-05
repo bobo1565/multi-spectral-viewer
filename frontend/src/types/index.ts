@@ -76,6 +76,14 @@ export interface VegetationStatistics {
 // 批次相关
 export type BandType = 'rgb' | '570nm' | '650nm' | '730nm' | '850nm';
 
+export interface RawImageParams {
+    width: number;
+    height: number;
+    bit_depth: 8 | 12 | 16;
+    channels: 1 | 3;
+    byte_order: 'little' | 'big';
+}
+
 export const BAND_TYPES: BandType[] = ['rgb', '570nm', '650nm', '730nm', '850nm'];
 
 export const BAND_LABELS: Record<BandType, string> = {

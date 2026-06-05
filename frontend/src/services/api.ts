@@ -2,7 +2,7 @@
  * API服务层
  */
 import axios from 'axios';
-import type { ImageInfo, HistogramData, WhiteBalanceParams, VegetationIndexInfo, BatchInfo, BandType } from '../types';
+import type { ImageInfo, HistogramData, WhiteBalanceParams, VegetationIndexInfo, BatchInfo, BandType, RawImageParams } from '../types';
 
 const API_BASE = import.meta.env.DEV ? 'http://localhost:8000' : '';
 
@@ -15,9 +15,12 @@ const api = axios.create({
 
 // 图像管理
 export const imageService = {
-    async uploadImage(file: File): Promise<ImageInfo> {
+    async uploadImage(file: File, rawParams?: RawImageParams): Promise<ImageInfo> {
         const formData = new FormData();
         formData.append('file', file);
+        if (rawParams) {
+            formData.append('raw_params', JSON.stringify(rawParams));
+        }
         const response = await api.post('/api/images/upload', formData, {
             headers: { 'Content-Type': 'multipart/form-data' },
         });
@@ -215,7 +218,8 @@ export const batchService = {
 
     async importImages(
         batchId: string,
-        files: Partial<Record<BandType, File | null>>
+        files: Partial<Record<BandType, File | null>>,
+        rawParamsMap?: Partial<Record<BandType, RawImageParams>>
     ): Promise<BatchInfo> {
         const formData = new FormData();
 
@@ -224,6 +228,22 @@ export const batchService = {
         if (files['650nm']) formData.append('band_650nm', files['650nm']);
         if (files['730nm']) formData.append('band_730nm', files['730nm']);
         if (files['850nm']) formData.append('band_850nm', files['850nm']);
+
+        const bandToFormKey: Record<BandType, string> = {
+            'rgb': 'raw_params_rgb',
+            '570nm': 'raw_params_570nm',
+            '650nm': 'raw_params_650nm',
+            '730nm': 'raw_params_730nm',
+            '850nm': 'raw_params_850nm',
+        };
+        if (rawParamsMap) {
+            for (const band of Object.keys(rawParamsMap) as BandType[]) {
+                const params = rawParamsMap[band];
+                if (params) {
+                    formData.append(bandToFormKey[band], JSON.stringify(params));
+                }
+            }
+        }
 
         const response = await api.post(`/api/batches/${batchId}/import`, formData, {
             headers: { 'Content-Type': 'multipart/form-data' },
