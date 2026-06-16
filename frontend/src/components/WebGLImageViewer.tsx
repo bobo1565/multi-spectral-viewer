@@ -225,6 +225,11 @@ export default function WebGLImageViewer({
   const colormapPropRef = useRef(colormap);
   const channelPropRef = useRef(channel);
 
+  // 卷帘对比状态: splitEnabled 控制是否启用分割, splitPos 为分割线位置 [0,1]
+  // 当任一覆盖层带有 clipPath 时启用; parseClipPath 将 'inset(0 X% 0 0)' 解析为 splitPos。
+  const splitEnabledRef = useRef(false);
+  const splitPosRef = useRef(1.0);
+
   // 视图状态
   const [scale, setScale] = useState(1);
   const [pixelValue, setPixelValue] = useState<PixelValue | null>(null);
@@ -332,6 +337,35 @@ export default function WebGLImageViewer({
     );
   }, []);
 
+  // ---- 解析 clipPath 'inset(0 right% 0 0)' → 分割线位置 (0=左, 1=右) ----
+  // CSS inset 右侧裁剪 right% 表示右侧 right% 不可见, 即左侧可见宽度为 (1 - right/100)。
+  // 映射到分割位置: splitPos = 1 - right/100。
+  const parseClipPath = useCallback((clipPath?: string): number | null => {
+    if (!clipPath || clipPath === 'none') return null;
+    // 仅支持水平卷帘: inset(0 <right>% 0 0)
+    const m = clipPath.match(/inset\(\s*0\s+([0-9.]+)%\s+0\s+0\s*\)/i);
+    if (!m) return null;
+    const right = parseFloat(m[1]);
+    if (!isFinite(right)) return null;
+    return Math.max(0, Math.min(1, 1 - right / 100));
+  }, []);
+
+  // ---- 更新卷帘 uniforms ----
+  const updateClipUniforms = useCallback(() => {
+    const gl = glRef.current;
+    const program = programRef.current;
+    if (!gl || !program) return;
+    gl.useProgram(program);
+    gl.uniform1i(
+      gl.getUniformLocation(program, 'u_clipEnabled'),
+      splitEnabledRef.current ? 1 : 0,
+    );
+    gl.uniform1f(
+      gl.getUniformLocation(program, 'u_clipPos'),
+      splitPosRef.current,
+    );
+  }, []);
+
   // ---- 初始化 WebGL ----
   const initWebGL = useCallback(() => {
     const canvas = canvasRef.current;
@@ -382,13 +416,14 @@ export default function WebGLImageViewer({
 
     updateMatrix();
     updateColormapUniforms();
+    updateClipUniforms();
 
     // 设置初始 imageRange uniforms
     for (let i = 0; i < MAX_LAYERS; i++) {
       const loc = gl.getUniformLocation(program, `u_imageRange[${i}]`);
       gl.uniform2f(loc, 0, 1);
     }
-  }, [updateMatrix, updateColormapUniforms]);
+  }, [updateMatrix, updateColormapUniforms, updateClipUniforms]);
 
   // ---- 上传 TIFF 浮点数据到纹理 ----
   const uploadFloatTexture = useCallback(
@@ -707,8 +742,15 @@ export default function WebGLImageViewer({
 
     const activeLayers = layers.filter((l) => l.visible !== false);
     let totalOverlayOpacity = 0;
+
+    // 卷帘对比: 查找第一个带 clipPath 的覆盖层, 解析其分割位置。
+    // 卷帘模式下覆盖层在分割线左侧完全显示(独立于基础层), 基础层在右侧显示。
+    let splitPos: number | null = null;
     for (let i = 0; i < Math.min(activeLayers.length, MAX_LAYERS - 1); i++) {
       const layer = activeLayers[i];
+      if (splitPos === null) {
+        splitPos = parseClipPath(layer.clipPath);
+      }
       const texIndex = i + 1;
       if (layer.url) {
         loadOverlayTexture(texIndex, layer.url);
@@ -728,15 +770,20 @@ export default function WebGLImageViewer({
     // result = base*(1-opacity) + overlay*opacity
     weightsRef.current[0] = Math.max(0, 1 - totalOverlayOpacity);
 
+    // 更新卷帘 uniforms
+    splitEnabledRef.current = splitPos !== null;
+    if (splitPos !== null) splitPosRef.current = splitPos;
+
     const gl = glRef.current;
     if (gl && programRef.current) {
       gl.uniform1fv(
         gl.getUniformLocation(programRef.current, 'u_weights'),
         weightsRef.current,
       );
+      updateClipUniforms();
     }
     needsRenderRef.current = true;
-  }, [layers, loadOverlayTexture]);
+  }, [layers, loadOverlayTexture, parseClipPath, updateClipUniforms]);
 
   // ---- 重置视图 ----
   const resetView = useCallback(() => {

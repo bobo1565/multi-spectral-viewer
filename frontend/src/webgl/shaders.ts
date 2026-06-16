@@ -30,6 +30,10 @@ uniform vec2 u_imageRange[${MAX_LAYERS}];
 uniform int u_isRGB[${MAX_LAYERS}];
 uniform vec2 u_threshold;
 uniform int u_channelMode;
+// 卷帘对比: u_clipEnabled=1 时启用, v_texCoord.x < u_clipPos 的区域显示覆盖层,
+// 其余区域显示基础层(layer 0)。等价于 CSS clip-path: inset(0 right% 0 0)。
+uniform int u_clipEnabled;
+uniform float u_clipPos;
 
 float smartScale(float normalizedValue, vec2 displayRange, vec2 imageRange) {
     float originalValue = normalizedValue * (imageRange.y - imageRange.x) + imageRange.x;
@@ -135,6 +139,30 @@ void accumulateLayer(
 }
 
 void main() {
+    // ---- 卷帘对比模式 ----
+    // 该模式下空间分割: 左侧(覆盖层) vs 右侧(基础层), 互不混合。
+    // 当 u_clipEnabled == 1 时启用, 否则按原有加权平均混合逻辑渲染。
+    if (u_clipEnabled == 1) {
+        vec4 baseColor = getLayerColor(texture2D(u_textures[0], v_texCoord), u_isRGB[0], u_imageRange[0]);
+        // 遍历覆盖层(layer 1..MAX_LAYERS-1), 取第一个有贡献(权重>0)的覆盖层作为对比层。
+        vec4 overlayColor = baseColor;
+        if (u_weights[1] > 0.0) {
+            overlayColor = getLayerColor(texture2D(u_textures[1], v_texCoord), u_isRGB[1], u_imageRange[1]);
+        } else if (u_weights[2] > 0.0) {
+            overlayColor = getLayerColor(texture2D(u_textures[2], v_texCoord), u_isRGB[2], u_imageRange[2]);
+        } else if (u_weights[3] > 0.0) {
+            overlayColor = getLayerColor(texture2D(u_textures[3], v_texCoord), u_isRGB[3], u_imageRange[3]);
+        }
+
+        // 左侧显示覆盖层, 右侧显示基础层
+        if (v_texCoord.x < u_clipPos) {
+            gl_FragColor = overlayColor;
+        } else {
+            gl_FragColor = baseColor;
+        }
+        return;
+    }
+
     vec4 finalColor = vec4(0.0);
     float sumW = 0.0;
 
