@@ -889,6 +889,7 @@ function App() {
                         image: _adaptBatchImage(sourceImgs[firstBand]),
                         imageType: 'source',
                     });
+                    setSelectedKey(`${newBatch.id}-source-${firstBand}-rgb`);
                 }
                 setExpandedKeys(prev => Array.from(new Set([...prev, newBatch.id, `${newBatch.id}-source`])));
             }

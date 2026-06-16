@@ -90,6 +90,8 @@ async def capture_to_batch(
     results: List[CaptureImageResult] = []
     # 记录已使用波段，避免多个相机绑到同一波段时覆盖
     used_bands = set()
+    # 可用波段池（用于未绑定波段的摄像头自动分配）
+    available_bands = [b for b in BAND_TYPES]
 
     for cam_id in payload.camera_ids:
         cam = CameraDBService.get_camera(db, cam_id)
@@ -100,19 +102,33 @@ async def capture_to_batch(
             ))
             continue
 
-        # 决定波段：优先用 overrides，再用 DB 绑定，最后回退 rgb
-        band = payload.band_overrides.get(cam_id) or cam.band_type or "rgb"
-        if band not in BAND_TYPES:
-            band = "rgb"
+        # 决定波段：优先用 overrides，再用 DB 绑定
+        band = payload.band_overrides.get(cam_id) or cam.band_type
 
-        # 相同波段冲突：在波段后追加 _2, _3 ... 这里简单处理为记录失败，让用户明确区分
-        if band in used_bands:
-            results.append(CaptureImageResult(
-                camera_id=cam_id, image_id="", band_type=band, filename="",
-                success=False,
-                message=f"波段 {band} 已被其他摄像头占用，请在 band_overrides 中显式指定",
-            ))
-            continue
+        if band:
+            # 显式绑定的摄像头：使用指定波段
+            if band not in BAND_TYPES:
+                band = "rgb"
+            if band in used_bands:
+                results.append(CaptureImageResult(
+                    camera_id=cam_id, image_id="", band_type=band, filename="",
+                    success=False,
+                    message=f"波段 {band} 已被其他摄像头占用",
+                ))
+                continue
+        else:
+            # 未绑定波段的摄像头：从可用波段池自动分配
+            band = None
+            for i, b in enumerate(available_bands):
+                if b not in used_bands:
+                    band = available_bands.pop(i)
+                    break
+            if not band:
+                results.append(CaptureImageResult(
+                    camera_id=cam_id, image_id="", band_type="", filename="",
+                    success=False, message="所有波段已分配完毕",
+                ))
+                continue
 
         # 确保流在跑
         stream = _ensure_stream(service, db, cam_id)

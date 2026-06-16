@@ -706,18 +706,27 @@ export default function WebGLImageViewer({
     if (!glRef.current) return;
 
     const activeLayers = layers.filter((l) => l.visible !== false);
+    let totalOverlayOpacity = 0;
     for (let i = 0; i < Math.min(activeLayers.length, MAX_LAYERS - 1); i++) {
       const layer = activeLayers[i];
       const texIndex = i + 1;
       if (layer.url) {
         loadOverlayTexture(texIndex, layer.url);
-        weightsRef.current[texIndex] = (layer.opacity ?? 1);
+        const w = (layer.opacity ?? 1);
+        weightsRef.current[texIndex] = w;
+        totalOverlayOpacity += w;
+      } else {
+        weightsRef.current[texIndex] = 0;
       }
     }
     // 清除多余的覆盖层
     for (let i = activeLayers.length + 1; i < MAX_LAYERS; i++) {
       weightsRef.current[i] = 0;
     }
+
+    // 调整基础图层权重，使加权平均模拟正确的透明度混合：
+    // result = base*(1-opacity) + overlay*opacity
+    weightsRef.current[0] = Math.max(0, 1 - totalOverlayOpacity);
 
     const gl = glRef.current;
     if (gl && programRef.current) {

@@ -179,9 +179,16 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
 
         setCapturing(true);
         try {
+            const band_overrides: Record<string, BandType> = {};
+            cameras.forEach(c => {
+                if (camera_ids.includes(c.id) && c.band_type) {
+                    band_overrides[c.id] = c.band_type;
+                }
+            });
             const resp = await captureApi.captureBatch({
                 camera_ids,
                 batch_name: batchName.trim() || undefined,
+                band_overrides,
             });
             const failedResults = resp.results.filter(r => !r.success);
             if (failedResults.length > 0) {
