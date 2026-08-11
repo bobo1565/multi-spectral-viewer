@@ -3,8 +3,11 @@
  */
 import axios from 'axios';
 import type { ImageInfo, HistogramData, WhiteBalanceParams, VegetationIndexInfo, BatchInfo, BandType, RawImageParams } from '../types';
+import type { Align3DParams, Align3DConfig, RigProfileInfo, PreviewDepthResponse, AlignmentBatchResponse } from './align3dApi';
 
-const API_BASE = import.meta.env.DEV ? 'http://localhost:8000' : '';
+export type { Align3DParams, Align3DConfig, RigProfileInfo, PreviewDepthResponse, AlignmentBatchResponse };
+
+const API_BASE = import.meta.env.DEV ? 'http://localhost:8002' : '';
 
 const api = axios.create({
     baseURL: API_BASE,
@@ -77,6 +80,18 @@ export const vegetationService = {
         }
         const response = await api.post('/api/vegetation/calculate', payload);
         return response.data;
+    },
+
+    /** 获取各波段辐射补偿系数 {波长nm: 系数} */
+    async getBandCorrection(): Promise<Record<string, number>> {
+        const response = await api.get('/api/vegetation/band-correction');
+        return response.data.corrections;
+    },
+
+    /** 更新各波段辐射补偿系数（持久化，后续计算生效） */
+    async updateBandCorrection(corrections: Record<string, number>): Promise<Record<string, number>> {
+        const response = await api.put('/api/vegetation/band-correction', { corrections });
+        return response.data.corrections;
     }
 };
 
@@ -115,9 +130,10 @@ export const alignmentService = {
         referenceImageId?: string,
         roi?: { x: number, y: number, width: number, height: number },
         alignMode?: string,
-        sam2Points?: number[][]
-    ): Promise<any> {
-        const payload: any = {
+        sam2Points?: number[][],
+        align3dParams?: Align3DParams,
+    ): Promise<AlignmentBatchResponse> {
+        const payload: Record<string, unknown> = {
             batch_id: batchId,
             overwrite,
             reference_image_id: referenceImageId,
@@ -128,6 +144,9 @@ export const alignmentService = {
         }
         if (sam2Points && sam2Points.length > 0) {
             payload.sam2_points = sam2Points;
+        }
+        if (align3dParams) {
+            payload.align3d_params = align3dParams;
         }
         const response = await api.post('/api/alignment/batch-align', payload);
         return response.data;
@@ -224,14 +243,14 @@ export const batchService = {
         const formData = new FormData();
 
         if (files.rgb) formData.append('rgb', files.rgb);
-        if (files['570nm']) formData.append('band_570nm', files['570nm']);
+        if (files['560nm']) formData.append('band_560nm', files['560nm']);
         if (files['650nm']) formData.append('band_650nm', files['650nm']);
         if (files['730nm']) formData.append('band_730nm', files['730nm']);
         if (files['850nm']) formData.append('band_850nm', files['850nm']);
 
         const bandToFormKey: Record<BandType, string> = {
             'rgb': 'raw_params_rgb',
-            '570nm': 'raw_params_570nm',
+            '560nm': 'raw_params_560nm',
             '650nm': 'raw_params_650nm',
             '730nm': 'raw_params_730nm',
             '850nm': 'raw_params_850nm',
@@ -250,6 +269,76 @@ export const batchService = {
         });
         return response.data;
     }
+};
+
+export const align3dService = {
+    async getConfig(): Promise<Align3DConfig> {
+        const response = await api.get('/api/align3d/config');
+        return response.data;
+    },
+
+    async updateConfig(config: Partial<Align3DConfig>): Promise<Align3DConfig> {
+        const response = await api.put('/api/align3d/config', config);
+        return response.data;
+    },
+
+    async listProfiles(): Promise<RigProfileInfo[]> {
+        const response = await api.get('/api/align3d/profiles');
+        return response.data;
+    },
+
+    async deleteProfile(name: string): Promise<void> {
+        await api.delete(`/api/align3d/profiles/${encodeURIComponent(name)}`);
+    },
+
+    async previewDepth(
+        batchId: string,
+        referenceImageId?: string,
+        align3dParams?: Align3DParams,
+    ): Promise<PreviewDepthResponse> {
+        const response = await api.post('/api/align3d/preview-depth', {
+            batch_id: batchId,
+            reference_image_id: referenceImageId,
+            align3d_params: align3dParams,
+        });
+        return response.data;
+    },
+
+    async createSelfcalibProfile(
+        batchId: string,
+        profileName: string = 'selfcalib',
+        referenceImageId?: string,
+    ): Promise<{ message: string; profile_name: string; path: string; bands: string[] }> {
+        const formData = new FormData();
+        formData.append('batch_id', batchId);
+        formData.append('profile_name', profileName);
+        if (referenceImageId) {
+            formData.append('reference_image_id', referenceImageId);
+        }
+        const response = await api.post('/api/align3d/profiles/selfcalib', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        return response.data;
+    },
+
+    async createCheckerboardProfile(
+        profileName: string,
+        referenceBand: string,
+        bands: string[],
+        files: File[],
+        bandLabels: string[],
+    ): Promise<{ message: string; profile_name: string; path: string; bands: string[]; errors: Record<string, number> }> {
+        const formData = new FormData();
+        formData.append('profile_name', profileName);
+        formData.append('reference_band', referenceBand);
+        formData.append('bands', bands.join(','));
+        formData.append('band_labels', bandLabels.join(','));
+        files.forEach(f => formData.append('files', f));
+        const response = await api.post('/api/align3d/profiles/checkerboard', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        return response.data;
+    },
 };
 
 export { api, API_BASE };

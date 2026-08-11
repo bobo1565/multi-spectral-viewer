@@ -17,7 +17,7 @@ interface LivePanelProps {
     onGoCameraManager: () => void;
 }
 
-const STATUS_POLL_MS = 3000;
+const STATUS_POLL_MS = 1500;
 const EXPECTED_CAMERA_COUNT = BAND_TYPES.length;
 const isDocumentVisible = () => typeof document === "undefined" || document.visibilityState === "visible";
 
@@ -31,9 +31,12 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [mainId, setMainId] = useState<string>('');
     const [capturing, setCapturing] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
     const [batchName, setBatchName] = useState('');
     const [refreshKey, setRefreshKey] = useState(0);
     const [previewSessionKey, setPreviewSessionKey] = useState(0);
+    // 递增此值可立即触发一次状态轮询（用于可见性恢复时 touch 保活时间戳、刷新流后立即同步）
+    const [pollTick, setPollTick] = useState(0);
     const [isStreamRenderingEnabled, setIsStreamRenderingEnabled] = useState(isDocumentVisible);
     const [maximizedCameraId, setMaximizedCameraId] = useState<string | null>(null);
 
@@ -63,10 +66,23 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
         loadCameras();
     }, [loadCameras]);
 
+    // 组件卸载（切离实时监控页）时，主动断开所有 MJPEG 长连接。
+    // HTTP/1.1 下浏览器对同一 origin 仅有约 6 个并发连接，MJPEG 是持续占用的
+    // 长连接。若不显式释放，切到分析页加载图片时会因连接池被占满而长时间空白。
+    useEffect(() => {
+        return () => {
+            document.querySelectorAll<HTMLImageElement>('img.tile-video').forEach(img => {
+                img.src = '';
+            });
+        };
+    }, []);
+
     const resumeStreamRendering = useCallback((notify = false) => {
         setIsStreamRenderingEnabled(true);
         setRefreshKey(k => k + 1);
         setPreviewSessionKey(k => k + 1);
+        // 立即触发一次状态轮询：刷新后端保活时间戳，确保 60s 内回来流未被清理、瞬间出图
+        setPollTick(t => t + 1);
         void loadCameras();
         if (notify) {
             message.success("已恢复摄像头画面");
@@ -118,7 +134,7 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
         poll();
         const h = setInterval(poll, STATUS_POLL_MS);
         return () => { cancelled = true; clearInterval(h); };
-    }, [applyStreamStatuses, monitoringCameras, mainId]);
+    }, [applyStreamStatuses, monitoringCameras, mainId, pollTick]);
 
     useEffect(() => {
         if (maximizedCameraId && !cameras.some(cam => cam.id === maximizedCameraId)) {
@@ -205,34 +221,73 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
         }
     };
 
-    // 刷新流：重启后端 RTSP → 即时同步在线状态 → 刷新前端 MJPEG
-    const handleRefreshStreams = async () => {
-        const activeIds = monitoringCameras.map(c => c.id);
-        if (activeIds.length === 0) return;
+    // 刷新结果反馈：全部连通即结束，避免固定等待拖慢整体响应
+    const REFRESH_RESULT_TIMEOUT_MS = 8000;
+    const REFRESH_RESULT_POLL_MS = 800;
 
-        // 1. 重启后端 RTSP 连接
+    // 刷新流：并行重启后端 RTSP（仅当前网格中已配置的摄像头）→ 重建前端 MJPEG → 轮询连接结果
+    const handleRefreshStreams = async () => {
+        const activeIds = visibleTileItems
+            .filter((item): item is Extract<LiveTileItem, { kind: 'camera' }> => item.kind === 'camera')
+            .map(item => item.camera.id);
+        if (activeIds.length === 0) {
+            message.info('当前没有已配置的摄像头可刷新');
+            return;
+        }
+
+        setRefreshing(true);
+        const hide = message.loading('正在重新连接视频流…', 0);
+
+        // 1. 重启后端 RTSP 连接（后端并行处理，耗时 ≈ 最慢的一台）
         try {
             await cameraApi.refreshStreams(activeIds);
         } catch {
             // 后端重启失败不阻断前端刷新
         }
 
-        // 2. 立即同步流状态（触发后端启停流）
-        try {
-            const statuses = await cameraApi.streamsStatus(activeIds, mainId);
-            applyStreamStatuses(statuses);
-        } catch {
-            // 静默
-        }
-
-        // 3. 刷新前端 MJPEG 连接（递增 refreshKey 使浏览器重新建立连接）
+        // 2. 刷新前端 MJPEG 连接（递增 refreshKey 使浏览器重新建立连接）
         setIsStreamRenderingEnabled(true);
         setPreviewSessionKey(k => k + 1);
         setRefreshKey(k => k + 1);
-
-        // 4. 重新加载摄像头列表（更新 is_connected 等）
+        setPollTick(t => t + 1); // 立即再轮询一次，持续反映连接进度
         void loadCameras();
-        message.success("已刷新视频流");
+
+        // 3. 轮询连接结果：全部连通立即反馈成功，最多等待 8s
+        const deadline = Date.now() + REFRESH_RESULT_TIMEOUT_MS;
+        const pollOnce = async (): Promise<boolean> => {
+            try {
+                const statuses = await cameraApi.streamsStatus(activeIds, mainId);
+                applyStreamStatuses(statuses);
+                const connected = statuses.filter(
+                    s => activeIds.includes(s.camera_id) && s.is_connected
+                ).length;
+                if (connected === activeIds.length || Date.now() >= deadline) {
+                    hide();
+                    if (connected === activeIds.length) {
+                        message.success(`已刷新视频流，全部 ${connected} 台已连接`);
+                    } else if (connected > 0) {
+                        message.warning(`已刷新视频流，${connected}/${activeIds.length} 台已连接`);
+                    } else {
+                        message.error('刷新完成，但暂无摄像头连接成功，请检查设备');
+                    }
+                    return true;
+                }
+            } catch {
+                if (Date.now() >= deadline) {
+                    hide();
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        const pollLoop = async () => {
+            while (!(await pollOnce())) {
+                await new Promise(resolve => setTimeout(resolve, REFRESH_RESULT_POLL_MS));
+            }
+            setRefreshing(false);
+        };
+        void pollLoop();
     };
 
     const handleSwapToMain = useCallback((cam_id: string) => {
@@ -334,6 +389,8 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
         const streamSrc = pauseReason ? "" : cameraApi.streamUrl(cam.id, STREAM_QUALITY, refreshKey);
         const checked = selectedIds.includes(cam.id);
         const online = status?.is_connected ?? cam.is_connected ?? false;
+        // “连接中”中间态：流已启动但尚未连上（RTSP 握手/等首帧中）
+        const connecting = !!status?.is_running && !online;
         const canPromoteToMain = variant === 'thumb';
 
         const handleVideoClick = () => {
@@ -400,8 +457,8 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
 
                 <div className="tile-overlay-bottom">
                     <span className="tile-status">
-                        <span className={`status-dot ${online ? '' : 'offline'}`} />
-                        {online ? `${status?.fps ?? 0} fps` : '离线'}
+                        <span className={`status-dot ${online ? '' : connecting ? 'connecting' : 'offline'}`} />
+                        {online ? `${status?.fps ?? 0} fps` : connecting ? '连接中…' : '离线'}
                     </span>
                     <span className="tile-select">
                         <Checkbox checked={checked} onChange={() => toggleSelect(cam.id)}>
@@ -458,7 +515,7 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
                     >
                         抓拍全部
                     </Button>
-                    <Button icon={<ReloadOutlined />} onClick={handleRefreshStreams}>刷新流</Button>
+                    <Button icon={<ReloadOutlined />} loading={refreshing} onClick={handleRefreshStreams}>刷新流</Button>
                     <Button icon={<SettingOutlined />} onClick={onGoCameraManager}>摄像头管理</Button>
                 </div>
             </div>

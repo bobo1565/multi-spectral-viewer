@@ -74,6 +74,7 @@ function App() {
     const [sam2ClickPoint, setSam2ClickPoint] = useState<{ x: number, y: number } | null>(null);
     const [sam2MaskB64, setSam2MaskB64] = useState<string | null>(null);
     const [sam2Loading, setSam2Loading] = useState(false);
+    const [depthPreviewB64, setDepthPreviewB64] = useState<string | null>(null);
     const [viewerTransform, setViewerTransform] = useState({
         scale: 1,
         offsetX: 0,
@@ -838,6 +839,12 @@ function App() {
                 setSam2ClickPoint={setSam2ClickPoint}
                 sam2Loading={sam2Loading}
                 setSam2Loading={setSam2Loading}
+                onPreviewDepth={(depthB64) => {
+                    setDepthPreviewB64(depthB64);
+                }}
+                onClearDepthPreview={() => {
+                    setDepthPreviewB64(null);
+                }}
             />,
         },
         {
@@ -987,6 +994,14 @@ function App() {
                                     url: `data:image/png;base64,${sam2MaskB64}`,
                                     opacity: 0.5,
                                     blendMode: 'screen' as React.CSSProperties['mixBlendMode']
+                                });
+                            }
+                            if (depthPreviewB64) {
+                                list.push({
+                                    id: 'depth-preview',
+                                    url: `data:image/png;base64,${depthPreviewB64}`,
+                                    opacity: 0.55,
+                                    blendMode: 'normal' as React.CSSProperties['mixBlendMode']
                                 });
                             }
                             if (compareLayer) {

@@ -1,0 +1,4 @@
+# Optional dependencies for align3d deep stereo backend
+# Install with: pip install -r requirements-align3d-optional.txt
+torch>=2.0.0
+torchvision>=0.15.0

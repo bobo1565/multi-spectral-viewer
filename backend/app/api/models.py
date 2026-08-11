@@ -93,6 +93,11 @@ class VegetationIndexInfo(BaseModel):
     required_bands: List[str]
 
 
+class BandCorrectionUpdate(BaseModel):
+    """更新波段辐射补偿系数：{波长nm: 系数}，允许部分更新"""
+    corrections: Dict[int, float]
+
+
 class VegetationIndexResponse(BaseModel):
     result_url: str
     result_filepath: str = ""
@@ -118,7 +123,7 @@ class AlignmentResponse(BaseModel):
 
 
 # 批次相关模型
-BAND_TYPES = ["rgb", "570nm", "650nm", "730nm", "850nm"]
+BAND_TYPES = ["rgb", "560nm", "650nm", "730nm", "850nm"]
 
 
 class BatchCreate(BaseModel):
@@ -160,7 +165,7 @@ class BatchRenameRequest(BaseModel):
 
 # ---------- 摄像头相关模型 ----------
 
-BandTypeLiteral = Literal["rgb", "570nm", "650nm", "730nm", "850nm"]
+BandTypeLiteral = Literal["rgb", "560nm", "650nm", "730nm", "850nm"]
 
 
 class CameraInfo(BaseModel):

@@ -3,7 +3,9 @@ import { Card, Button, Checkbox, message, Alert, Select, Form, Tag } from 'antd'
 import { SyncOutlined, ThunderboltOutlined, AimOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import type { BatchInfo, ImageInfo } from '../types';
 import { alignmentService } from '../services/api';
+import type { Align3DParams } from '../services/align3dApi';
 import type { ROICoords } from './ROICanvas';
+import Align3DOptions from './Align3DOptions';
 import './AlignmentPanel.css';
 
 interface Props {
@@ -28,6 +30,9 @@ interface Props {
     setSam2ClickPoint?: (pt: { x: number; y: number } | null) => void;
     sam2Loading?: boolean;
     setSam2Loading?: (l: boolean) => void;
+    /** 深度图预览回调 */
+    onPreviewDepth?: (depthB64: string, method: string, confidence: number) => void;
+    onClearDepthPreview?: () => void;
 }
 
 export default function AlignmentPanel({
@@ -42,12 +47,24 @@ export default function AlignmentPanel({
     onCancelSam2Click,
     sam2MaskB64,
     sam2ClickPoint,
-    sam2Loading
+    sam2Loading,
+    onPreviewDepth,
+    onClearDepthPreview,
 }: Props) {
     const [overwrite, setOverwrite] = useState<boolean>(true);
     const [loading, setLoading] = useState(false);
     const [selectedRefId, setSelectedRefId] = useState<string | null>(null);
-    const [alignMode, setAlignMode] = useState<'homography' | 'homography_roi' | 'optical_flow' | 'sam2_object'>('homography');
+    const [alignMode, setAlignMode] = useState<
+        'homography' | 'homography_roi' | 'optical_flow' | 'sam2_object' | 'reconstruction_3d'
+    >('homography');
+    const [align3dParams, setAlign3dParams] = useState<Align3DParams>({
+        depth_min: 0.5,
+        depth_max: 20,
+        num_planes: 32,
+        depth_backend: 'auto',
+        cost_method: 'census',
+        fallback_to_homography: true,
+    });
 
     const actualBatchId = batch?.id || batchId;
 
@@ -74,10 +91,13 @@ export default function AlignmentPanel({
         }
     }, [sourceImages]);
 
-    // 切换模式时清除 ROI
+    // 切换模式时清除 ROI / 深度预览
     useEffect(() => {
         if (alignMode !== 'homography_roi') {
             onClearROI?.();
+        }
+        if (alignMode !== 'reconstruction_3d') {
+            onClearDepthPreview?.();
         }
     }, [alignMode]);
 
@@ -96,15 +116,16 @@ export default function AlignmentPanel({
             const result = await alignmentService.batchAlign(
                 actualBatchId,
                 overwrite,
-                selectedRefId || undefined, // Pass undefined if null
+                selectedRefId || undefined,
                 alignMode === 'homography_roi' && roi ? {
                     x: roi.x,
                     y: roi.y,
                     width: roi.width,
                     height: roi.height
                 } : undefined,
-                alignMode, // Pass alignMode directly as backendMode
-                sam2Points
+                alignMode,
+                sam2Points,
+                alignMode === 'reconstruction_3d' ? align3dParams : undefined,
             );
 
             if (result.new_images && result.new_images.length > 0) {
@@ -180,6 +201,7 @@ export default function AlignmentPanel({
                             { label: 'Homography + ROI（深度选择）', value: 'homography_roi' },
                             { label: '稠密光流（逐像素）', value: 'optical_flow' },
                             { label: 'SAM2 物体配准 (Object-Based)', value: 'sam2_object' },
+                            { label: '三维重建配准（多视图深度）', value: 'reconstruction_3d' },
                         ]}
                     />
                 </Form.Item>
@@ -241,6 +263,16 @@ export default function AlignmentPanel({
                             </Button>
                         )}
                     </Form.Item>
+                )}
+
+                {alignMode === 'reconstruction_3d' && actualBatchId && (
+                    <Align3DOptions
+                        batchId={actualBatchId}
+                        referenceImageId={selectedRefId || undefined}
+                        params={align3dParams}
+                        onChange={setAlign3dParams}
+                        onPreviewDepth={onPreviewDepth}
+                    />
                 )}
 
                 {/* ROI 绘制区 */}

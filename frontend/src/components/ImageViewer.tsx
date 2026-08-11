@@ -94,18 +94,36 @@ export default function ImageViewer({
     const [pixelValue, setPixelValue] = useState<PixelValue | null>(null);
     const imageDataRef = useRef<ImageData | null>(null);
     const originalImageDataRef = useRef<ImageData | null>(null);
+    // 记录当前原图 URL，默认参数直通时作为 processedUrl，避免 canvas 处理
+    const originalImageUrlRef = useRef<string | null>(null);
+    // 图像处理 Worker（逐像素运算放后台线程，避免阻塞 UI）
+    const workerRef = useRef<Worker | null>(null);
+    // 处理请求序号：丢弃过期结果（快速连续调参时只用最新一次）
+    const processSeqRef = useRef(0);
 
     // 防抖计时器用于直方图计算
     const histogramTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     // 像素值更新节流
     const lastPixelUpdateRef = useRef(0);
 
-    // 组件卸载时清理定时器
+    // 组件卸载时清理定时器和 Worker
     useEffect(() => {
         return () => {
             if (histogramTimerRef.current) clearTimeout(histogramTimerRef.current);
+            if (workerRef.current) {
+                workerRef.current.terminate();
+                workerRef.current = null;
+            }
         };
     }, []);
+
+    // 懒加载获取图像处理 Worker
+    const getWorker = (): Worker => {
+        if (!workerRef.current) {
+            workerRef.current = new Worker(new URL('./imageWorker.ts', import.meta.url), { type: 'module' });
+        }
+        return workerRef.current;
+    };
 
     // 将视图重置为适应容器
     const emitTransform = useCallback((nextScale: number, nextOffset: { x: number; y: number }) => {
@@ -246,6 +264,8 @@ export default function ImageViewer({
         setLoading(true);
         const imgElement = new Image();
         imgElement.crossOrigin = 'anonymous';
+        // 记录原图 URL，默认参数直通时直接使用，跳过 canvas 像素处理
+        originalImageUrlRef.current = url;
 
         imgElement.onload = () => {
             const canvas = document.createElement('canvas');
@@ -287,117 +307,83 @@ export default function ImageViewer({
         imgElement.src = url;
     };
 
-    const processImageData = () => {
+    // 仅统计直方图（不生成新图），用于默认参数直通场景，避免 canvas 循环 + toDataURL。
+    const computeHistogramFromOriginal = () => {
         if (!originalImageDataRef.current) return;
-
-        const width = originalImageDataRef.current.width;
-        const height = originalImageDataRef.current.height;
         const srcData = originalImageDataRef.current.data;
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        const newImageData = ctx.createImageData(width, height);
-        const dstData = newImageData.data;
-
-        // 直方图数据
         const histR = new Array(256).fill(0);
         const histG = new Array(256).fill(0);
         const histB = new Array(256).fill(0);
-
         for (let i = 0; i < srcData.length; i += 4) {
-            let r = srcData[i];
-            let g = srcData[i + 1];
-            let b = srcData[i + 2];
-            let a = srcData[i + 3];
-
-            // 1. 提取通道
-            if (channel === 'tiff') {
-                // TIFF 预览已由后端归一化，取灰度值
-                const value = Math.round(0.299 * srcData[i] + 0.587 * srcData[i + 1] + 0.114 * srcData[i + 2]);
-                const [cr, cg, cb] = applyColormap(value, colormap);
-                r = cr; g = cg; b = cb;
-            } else if (channel !== 'rgb') {
-                const channelIndex = channel === 'r' ? 0 : channel === 'g' ? 1 : 2;
-                const value = srcData[i + channelIndex];
-                // 应用色带
-                const [cr, cg, cb] = applyColormap(value, colormap);
-                r = cr; g = cg; b = cb;
-            } else {
-                // 2. 应用白平衡 (仅RGB模式)
-                r = Math.min(255, r * whiteBalance.r);
-                g = Math.min(255, g * whiteBalance.g);
-                b = Math.min(255, b * whiteBalance.b);
-
-                // 3. 应用饱和度 (仅RGB模式)
-                if (saturation !== 1) {
-                    const gray = 0.2989 * r + 0.5870 * g + 0.1140 * b;
-                    r = Math.min(255, Math.max(0, gray + (r - gray) * saturation));
-                    g = Math.min(255, Math.max(0, gray + (g - gray) * saturation));
-                    b = Math.min(255, Math.max(0, gray + (b - gray) * saturation));
-                }
-            }
-
-            dstData[i] = r;
-            dstData[i + 1] = g;
-            dstData[i + 2] = b;
-            dstData[i + 3] = a;
-
-            // 统计直方图
-            histR[Math.min(255, Math.round(r))]++;
-            histG[Math.min(255, Math.round(g))]++;
-            histB[Math.min(255, Math.round(b))]++;
+            histR[srcData[i]]++;
+            histG[srcData[i + 1]]++;
+            histB[srcData[i + 2]]++;
         }
-
-        imageDataRef.current = newImageData; // 更新当前显示用的数据用于像素拾取
-        ctx.putImageData(newImageData, 0, 0);
-        setProcessedUrl(canvas.toDataURL('image/png'));
-
-        // 更新直方图（防抖）
         if (histogramTimerRef.current) clearTimeout(histogramTimerRef.current);
         histogramTimerRef.current = setTimeout(() => {
             onHistogramChange?.({ r: histR, g: histG, b: histB });
         }, 100);
     };
 
-    // 色带映射函数
-    const applyColormap = (value: number, map: string): [number, number, number] => {
-        const norm = value / 255;
+    // 判断当前参数是否需要逐像素处理。
+    // rgb 通道 + 白平衡全 1 + 饱和度 1 时，输出恒等于原图，可跳过昂贵的 canvas 循环。
+    const needsPixelProcessing = () => {
+        if (channel === 'tiff' || channel !== 'rgb') return true;
+        if (saturation !== 1) return true;
+        if (whiteBalance.r !== 1 || whiteBalance.g !== 1 || whiteBalance.b !== 1) return true;
+        return false;
+    };
 
-        switch (map) {
-            case 'gray':
-                return [value, value, value];
-            case 'jet':
-                if (norm < 0.125) {
-                    return [0, 0, Math.round(128 + norm * 1024)];
-                } else if (norm < 0.375) {
-                    return [0, Math.round((norm - 0.125) * 1024), 255];
-                } else if (norm < 0.625) {
-                    return [Math.round((norm - 0.375) * 1024), 255, Math.round(255 - (norm - 0.375) * 1024)];
-                } else if (norm < 0.875) {
-                    return [255, Math.round(255 - (norm - 0.625) * 1024), 0];
-                } else {
-                    return [Math.round(255 - (norm - 0.875) * 1024), 0, 0];
-                }
-            case 'hot':
-                if (norm < 0.33) {
-                    return [Math.round(norm * 768), 0, 0];
-                } else if (norm < 0.67) {
-                    return [255, Math.round((norm - 0.33) * 768), 0];
-                } else {
-                    return [255, 255, Math.round((norm - 0.67) * 768)];
-                }
-            case 'viridis':
-                const r = Math.round(68 + norm * 185);
-                const g = Math.round(1 + norm * 230);
-                const b = Math.round(84 - norm * 47);
-                return [Math.max(0, Math.min(255, r)), Math.max(0, Math.min(255, g)), Math.max(0, Math.min(255, b))];
-            default:
-                return [value, value, value];
+    const processImageData = () => {
+        if (!originalImageDataRef.current) return;
+
+        // 默认参数：跳过逐像素处理，直方图单独轻量统计后直接用原图。
+        if (!needsPixelProcessing()) {
+            computeHistogramFromOriginal();
+            setProcessedUrl(originalImageUrlRef.current);
+            return;
         }
+
+        const width = originalImageDataRef.current.width;
+        const height = originalImageDataRef.current.height;
+
+        // 逐像素处理放到 Web Worker，避免 465 万次循环阻塞主线程。
+        // 这里拷贝一份数据发给 worker（originalImageDataRef 仍需保留供像素拾取/调参复用）。
+        const srcCopy = new Uint8ClampedArray(originalImageDataRef.current.data);
+        const seq = ++processSeqRef.current;
+        const worker = getWorker();
+
+        worker.onmessage = (e: MessageEvent) => {
+            // 丢弃过期结果：快速连续调参时只采用最新一次
+            if (seq !== processSeqRef.current) return;
+            const { data: dstData, width: w, height: h, histogram } = e.data;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+
+            const newImageData = new ImageData(dstData, w, h);
+            imageDataRef.current = newImageData; // 更新当前显示用的数据用于像素拾取
+            ctx.putImageData(newImageData, 0, 0);
+            setProcessedUrl(canvas.toDataURL('image/png'));
+
+            if (histogramTimerRef.current) clearTimeout(histogramTimerRef.current);
+            histogramTimerRef.current = setTimeout(() => {
+                onHistogramChange?.(histogram);
+            }, 100);
+        };
+
+        worker.postMessage({
+            width,
+            height,
+            data: srcCopy,
+            channel,
+            colormap,
+            whiteBalance,
+            saturation,
+        }, [srcCopy.buffer]);
     };
 
     const handleZoomIn = () => {

@@ -51,5 +51,14 @@ logs/
 *.pkl
 *.h5
 
-# ── 本地脚本 ────────────────────────────
-stop-local-all.sh
+# ── 编辑器 / Agent 本地配置 ───────────────
+.claude/
+.zcode/
+
+# ── 后端测试产物 ─────────────────────────
+/backend/result.json
+/backend/*_snapshot.jpg
+/backend/test*.jpg
+
+# ── 摄像头配置迁移数据 ────────────────────
+cameras_db.json*

@@ -5,6 +5,16 @@
 import numpy as np
 import cv2
 
+from app.core.radiometric import get_band_correction
+
+# 指数波段名 → 中心波长（nm）
+BAND_WAVELENGTH_NM = {
+    'GREEN': 560,
+    'RED': 650,
+    'RED_EDGE': 730,
+    'NIR': 850,
+}
+
 
 class VegetationIndexCalculator:
     """
@@ -78,10 +88,10 @@ class VegetationIndexCalculator:
     def set_band_image(self, band_name: str, image: np.ndarray):
         """
         设置波段图像
-        
+
         Args:
             band_name: 波段名称 (NIR, RED, GREEN, BLUE, RED_EDGE)
-            image: 图像数组（可以是彩色或灰度，8位或16位）
+            image: 原始图像数组（彩色或灰度，8 位，0~255）
         """
         if image is None:
             return
@@ -92,12 +102,15 @@ class VegetationIndexCalculator:
         else:
             gray = image.copy()
         
-        # 将图像转为float32并归一化到0-255范围
-        gray = gray.astype(np.float32)
+        # 灰度值直接按 0~255 量程归一化为 0~1 浮点数，
+        # 不做基于图像最大/最小值的统计缩放，保证跨波段辐射可比性
+        gray = gray.astype(np.float32) / 255.0
         
-        # 如果是16位图像，归一化到0-255
-        if gray.max() > 255:
-            gray = (gray / gray.max()) * 255
+        # 一级相对辐射补偿（IMX290C 响应曲线 + FWHM 带宽，系数可在页面配置）
+        wavelength = BAND_WAVELENGTH_NM.get(band_name)
+        correction = get_band_correction().get(wavelength, 1.0) if wavelength is not None else 1.0
+        if correction != 1.0:
+            gray = gray * correction
         
         self._band_images[band_name] = gray
         self._result = None  # 清除缓存

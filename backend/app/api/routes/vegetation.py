@@ -12,15 +12,33 @@ from app.api.models import (
     VegetationIndexRequest,
     VegetationIndexInfo,
     VegetationIndexResponse,
+    BandCorrectionUpdate,
     BandSelection,
 )
 from app.storage.file_manager import file_manager
 from app.core.vegetation_index import VegetationIndexCalculator
+from app.core.radiometric import get_band_correction, update_band_correction
 from app.api.routes.blending import get_channel_from_image
 from app.api.routes.processing import numpy_to_bytes
 from app.database import get_db
 
 router = APIRouter()
+
+
+@router.get("/band-correction")
+async def get_band_correction_config():
+    """获取各波段的一级相对辐射补偿系数（IMX290C 响应曲线 + FWHM 带宽）"""
+    return {"corrections": {str(k): v for k, v in sorted(get_band_correction().items())}}
+
+
+@router.put("/band-correction")
+async def update_band_correction_config(payload: BandCorrectionUpdate):
+    """更新波段补偿系数（持久化保存，后续的指数计算立即生效）"""
+    try:
+        current = update_band_correction(payload.corrections)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"corrections": {str(k): v for k, v in sorted(current.items())}}
 
 
 @router.get("/indices", response_model=List[VegetationIndexInfo])

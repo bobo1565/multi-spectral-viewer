@@ -126,8 +126,9 @@ class AlignmentBatchRequest(BaseModel):
     overwrite: bool = True
     reference_image_id: Optional[str] = None
     roi: Optional[ROICoords] = None
-    align_mode: Optional[str] = 'homography'  # 'homography' | 'optical_flow' | 'sam2_object'
+    align_mode: Optional[str] = 'homography'  # homography | optical_flow | sam2_object | reconstruction_3d
     sam2_points: Optional[List[List[int]]] = None  # [[x1,y1], [x2,y2]] 用户点选坐标
+    align3d_params: Optional[Dict[str, Any]] = None  # 三维重建参数
 
 class NewFileInfo(BaseModel):
     id: str
@@ -181,8 +182,13 @@ async def batch_align(request: AlignmentBatchRequest, db: Session = Depends(get_
     aligned_dir = batch_dir / aligned_dir_name
     
     for p in batch_dir.glob("aligned*"):
+        # 跳过 macOS AppleDouble 残留文件（._aligned 等），避免 rmtree 误处理
+        if p.name.startswith('._'):
+            continue
         if p.is_dir():
-            shutil.rmtree(p)
+            # ignore_errors: 容忍目录内 ._ 残留文件在删除竞态中已不存在等无害错误，
+            # 否则会抛 FileNotFoundError 导致整个对齐接口 500（前端表现为 CORS 错误）
+            shutil.rmtree(p, ignore_errors=True)
 
     # 确保目录存在
     source_dir.mkdir(parents=True, exist_ok=True)
@@ -271,6 +277,10 @@ async def batch_align(request: AlignmentBatchRequest, db: Session = Depends(get_
 
     # 2. 调用对齐服务
     service = ImageAlignerService()
+
+    image_band_map = {}
+    for img in source_images:
+        image_band_map[str(Path(img.filepath).absolute())] = img.band_type or "unknown"
     
     try:
         results = service.align_batch(
@@ -281,6 +291,9 @@ async def batch_align(request: AlignmentBatchRequest, db: Session = Depends(get_
             custom_roi=custom_roi_dict,
             align_mode=request.align_mode or 'homography',
             sam2_points=request.sam2_points,
+            align3d_params=request.align3d_params,
+            batch_id=batch_id,
+            image_band_map=image_band_map,
         )
         
         # 3. 处理结果

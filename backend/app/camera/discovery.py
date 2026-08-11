@@ -20,8 +20,16 @@ class CameraDiscovery:
 
     # 常见摄像头的RTSP路径 - 按优先级排序
     COMMON_RTSP_PATHS = [
+        # 海康威视
         "/Streaming/Channels/101",
         "/Streaming/Channels/102",
+        "/Streaming/Channels/1",
+        # 雄迈 / XMEye / HiSilicon 方案（常见 OEM 贴牌）
+        "/h264_1",
+        "/h264_2",
+        "/h264/ch1/main/av_stream",
+        "/h264/ch1/sub/av_stream",
+        # 通用 / 其它厂商
         "/ch1/main/av_stream",
         "/ch1/sub/av_stream",
         "/cam/realmonitor?channel=1&subtype=0",
@@ -161,13 +169,20 @@ class CameraDiscovery:
 
     def try_rtsp_url(self, ip: str, port: int, path: str,
                      username: str = "", password: str = "",
-                     timeout: int = 1) -> Optional[str]:
-        """尝试连接RTSP URL - 使用线程防止卡死"""
+                     timeout: int = 4) -> Optional[str]:
+        """尝试连接RTSP URL - 使用线程防止卡死
+
+        timeout 默认 4 秒：RTSP 尤其是 digest 认证需要先发匿名请求拿到
+        WWW-Authenticate(realm/nonce) 再计算 MD5 重发，加上等待首帧，
+        整个过程常超过 1 秒。过短的超时会把能开的流误判为失败。
+        """
         import cv2
 
         result = [None]
 
-        if username and password:
+        if username:
+            # 只要提供了用户名就带认证段。注意密码允许为空（很多雄迈/XMEye
+            # 方案相机默认 admin/空密码），此时保留冒号：rtsp://admin:@host/path
             url = f"rtsp://{username}:{password}@{ip}:{port}{path}"
         else:
             url = f"rtsp://{ip}:{port}{path}"
@@ -277,7 +292,7 @@ class CameraDiscovery:
 
         # 1. 匿名尝试前 5 条路径
         for path in self.COMMON_RTSP_PATHS[:5]:
-            url = self.try_rtsp_url(ip, port, path, "", "", 1)
+            url = self.try_rtsp_url(ip, port, path, "", "")
             if url:
                 self.log(f"  ✓ 发现RTSP流: {path}")
                 return {
@@ -298,7 +313,7 @@ class CameraDiscovery:
         for cred in self.config.get('discovery', {}).get('common_credentials', []):
             for path in self.COMMON_RTSP_PATHS[:8]:
                 credential_count += 1
-                url = self.try_rtsp_url(ip, port, path, cred['username'], cred['password'], 1)
+                url = self.try_rtsp_url(ip, port, path, cred['username'], cred['password'])
                 if url:
                     self.log(f"  ✓ 发现RTSP流(需认证): {path}")
                     return {

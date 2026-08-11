@@ -1,11 +1,35 @@
 """
 FastAPI主应用入口
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 from pathlib import Path
+
+
+class CacheControlMiddleware(BaseHTTPMiddleware):
+    """按路径前缀设置缓存策略。
+
+    - /api/ 数据接口：强制禁用缓存。抓拍后前端立即 listBatches() 刷新，若该 GET
+      无 freshness 指令，浏览器会“启发式缓存”复用旧响应，导致新批次找不到、
+      主图空白，需手动清缓存。no-store 杜绝该问题。
+    - /uploads/ 静态图片：允许浏览器缓存（max-age=3600）。这类文件名含 UUID 且
+      写入后不变，缓存安全；切页面后回来可直接用本地缓存，无需重新下载/解码，
+      显著加快分析页图像显示（尤其从实时监控切回时不再受连接竞争影响）。
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        response: Response = await call_next(request)
+        path = request.url.path
+        if path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        elif path.startswith("/uploads/"):
+            response.headers["Cache-Control"] = "public, max-age=3600"
+        return response
 
 # 获取项目根目录
 import os; PROJECT_ROOT = Path("/app") if os.getenv("ENV") == "production" else Path(__file__).parent.parent.parent
@@ -25,10 +49,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# 注意：中间件按“后注册先执行”的顺序，CacheControlMiddleware 注册在
+# CORSMiddleware 之后，会在 CORS 处理完毕后按路径追加缓存头。
+app.add_middleware(CacheControlMiddleware)
 
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
-from app.api.routes import images, processing, blending, vegetation, alignment, batches, cameras, capture
+from app.api.routes import images, processing, blending, vegetation, alignment, align3d, batches, cameras, capture
 from app.database import engine, Base, SessionLocal
 from app.services.image_db_service import ImageDBService
 from app.storage.file_manager import file_manager
@@ -40,6 +67,7 @@ app.include_router(processing.router, prefix="/api/processing", tags=["processin
 app.include_router(blending.router, prefix="/api/blending", tags=["blending"])
 app.include_router(vegetation.router, prefix="/api/vegetation", tags=["vegetation"])
 app.include_router(alignment.router, prefix="/api/alignment", tags=["alignment"])
+app.include_router(align3d.router, prefix="/api/align3d", tags=["align3d"])
 app.include_router(batches.router, prefix="/api/batches", tags=["batches"])
 app.include_router(cameras.router, prefix="/api/cameras", tags=["cameras"])
 app.include_router(capture.router, prefix="/api/capture", tags=["capture"])
@@ -62,6 +90,22 @@ async def startup_event():
             print("[Startup] 已为 cameras 表添加 is_monitoring 列")
     except Exception as e:
         print(f"[Startup] 添加 is_monitoring 列（表可能尚不存在）: {e}")
+
+    # 自动迁移：波段标签 570nm 统一更名为 560nm（images 与 cameras 两张表）
+    try:
+        from sqlalchemy import text
+        total = 0
+        with engine.connect() as conn:
+            for table in ("images", "cameras"):
+                result = conn.execute(
+                    text(f"UPDATE {table} SET band_type='560nm' WHERE band_type='570nm'")
+                )
+                total += result.rowcount or 0
+            conn.commit()
+        if total:
+            print(f"[Startup] 已将 {total} 条记录的波段标签 570nm 更名为 560nm")
+    except Exception as e:
+        print(f"[Startup] 波段更名迁移失败: {e}")
 
     # 初始化摄像头服务（StreamManager + CameraDiscovery 单例）
     camera_service = get_camera_service()
@@ -211,12 +255,12 @@ def _import_image_file(db, img_file: 'Path', batch_id: str, image_type: str):
 
 
 def _detect_band_type(filename: str) -> str:
-    """从文件名检测波段类型"""
+    """从文件名检测波段类型（旧文件中的 570 标注统一视为 560nm 波段）"""
     lower = filename.lower()
     if 'rgb' in lower:
         return 'rgb'
-    elif '570' in lower:
-        return '570nm'
+    elif '560' in lower or '570' in lower:
+        return '560nm'
     elif '650' in lower:
         return '650nm'
     elif '730' in lower:

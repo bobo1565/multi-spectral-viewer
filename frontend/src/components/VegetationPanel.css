@@ -61,6 +61,22 @@
     color: #666;
 }
 
+.correction-section {
+    margin-bottom: 16px;
+}
+
+.correction-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.correction-item .correction-label {
+    font-size: 12px;
+    color: #666;
+    white-space: nowrap;
+}
+
 .vegetation-panel .ant-statistic {
     text-align: center;
 }
