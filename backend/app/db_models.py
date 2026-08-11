@@ -21,7 +21,7 @@ class Image(Base):
 
     id = Column(String, primary_key=True, index=True)
     batch_id = Column(String, ForeignKey("batches.id"), nullable=True)
-    band_type = Column(String, nullable=True)  # "rgb", "570nm", "650nm", "730nm", "850nm"
+    band_type = Column(String, nullable=True)  # "rgb", "560nm", "650nm", "730nm", "850nm"
     image_type = Column(String, default="source")  # "source" 或 "aligned"
     filename = Column(String, index=True)      # 原始文件名
     filepath = Column(String)                  # 物理路径
@@ -45,7 +45,7 @@ class Camera(Base):
     username = Column(String, nullable=True)
     password = Column(String, nullable=True)
     camera_type = Column(String, nullable=True)  # ONVIF / RTSP / Manual
-    # 绑定波段类型: rgb / 570nm / 650nm / 730nm / 850nm / None
+    # 绑定波段类型: rgb / 560nm / 650nm / 730nm / 850nm / None
     band_type = Column(String, nullable=True)
     is_monitoring = Column(Boolean, default=True)  # 是否加入实时监控（默认加入）
     added_at = Column(DateTime, default=datetime.utcnow)

@@ -1,0 +1,20 @@
+{
+  "depth_min": 0.5,
+  "depth_max": 20.0,
+  "num_planes": 32,
+  "depth_backend": "auto",
+  "cost_method": "census",
+  "assumed_hfov_deg": 60.0,
+  "fallback_to_homography": true,
+  "min_valid_ratio": 0.3,
+  "min_ncc_improvement": -0.05,
+  "pyramid_levels": 2,
+  "sgbm_num_disparities": 128,
+  "sgbm_block_size": 7,
+  "use_wls_filter": true,
+  "rig_profile": "",
+  "checkerboard_cols": 9,
+  "checkerboard_rows": 6,
+  "checkerboard_square_size_mm": 25.0,
+  "description": "默认三维重建对齐配置 - 可通过 API 动态修改"
+}

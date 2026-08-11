@@ -90,7 +90,7 @@ async def get_spectral_curve(request: SpectralCurveRequest, db: Session = Depend
     """获取指定像素位置的光谱曲线"""
     # 波段到波长的映射
     wavelength_map = {
-        "570nm": 570,
+        "560nm": 560,
         "650nm": 650,
         "730nm": 730,
         "850nm": 850

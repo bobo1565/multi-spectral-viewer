@@ -18,7 +18,7 @@ interface Props {
 
 // 预定义光谱波段（不包含RGB）
 const SPECTRAL_BANDS: { name: BandType; wavelength: number; color: string }[] = [
-    { name: '570nm', wavelength: 570, color: '#00ff66' },
+    { name: '560nm', wavelength: 560, color: '#00ff66' },
     { name: '650nm', wavelength: 650, color: '#ff0000' },
     { name: '730nm', wavelength: 730, color: '#cc0066' },
     { name: '850nm', wavelength: 850, color: '#660033' },

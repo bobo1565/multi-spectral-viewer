@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua
 
 # 复制应用代码
 COPY app/ /app/app/
+COPY align3d/ /app/align3d/
 
 # 创建上传目录
 RUN mkdir -p /app/uploads/original /app/uploads/processed /app/uploads/temp

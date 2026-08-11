@@ -89,7 +89,10 @@ class ImageAlignerService:
     def align_batch(self, reference_path: str, target_paths: list, output_dir: str, 
                            overwrite: bool = True, custom_roi: dict = None,
                            align_mode: str = 'homography',
-                           sam2_points: list = None) -> dict:
+                           sam2_points: list = None,
+                           align3d_params: dict = None,
+                           batch_id: str = None,
+                           image_band_map: dict = None) -> dict:
         """
         执行批量对齐，并将结果保存到指定目录
         
@@ -97,6 +100,7 @@ class ImageAlignerService:
           - 'homography': 全局 Homography（默认）
           - 'optical_flow': Homography 粗对齐 + Farneback 稠密光流精配
           - 'sam2_object': SAM2 物体分割驱动的掩码约束配准
+          - 'reconstruction_3d': 三维重建多视图深度配准
         
         ROI 优先级：custom_roi（前端手动绘制） > matching.json（默认配置）
         每次调用都重新加载 matching.json，确保配置热更新生效。
@@ -150,94 +154,117 @@ class ImageAlignerService:
                 print("[AlignService] 将回退到全图配准")
 
         # 3. 对齐目标图像
-        for path in target_paths:
-            if os.path.abspath(path) == os.path.abspath(reference_path):
-                continue
-                
+        if align_mode == 'reconstruction_3d':
+            from app.core.align3d_adapter import align_batch_reconstruction_3d
             try:
-                tgt_img = cv2.imread(path)
-                if tgt_img is None:
-                    results[path] = (False, f"无法加载目标图: {path}", None)
-                    continue
-                
-                if align_mode == 'sam2_object':
-                    # SAM2 物体配准模式
-                    print(f"[AlignService] SAM2 模式：正在分割目标图 {path}...")
-                    try:
-                        if sam2_points:
-                            # 使用相同的点坐标（多光谱图像场景相同）
-                            tgt_masks = sam2_client.segment_image_by_points(path, sam2_points)
-                        else:
-                            tgt_masks = sam2_client.segment_image(path)
-                        tgt_mask = sam2_client.get_largest_mask(tgt_masks, top_n=3)
-                        if tgt_mask is not None:
-                            print(f"[AlignService] 目标图掩码获取成功，覆盖像素: {tgt_mask.sum() // 255}")
-                            print(f"[AlignService] 目标图尺寸: {tgt_img.shape}, 掩码尺寸: {tgt_mask.shape}")
-                    except Exception as e:
-                        print(f"[AlignService] SAM2 分割目标图失败: {e}")
-                        tgt_mask = None
-                    
-                    # 确保掩码尺寸与图像尺寸匹配
-                    if ref_mask is not None and ref_mask.shape[:2] != ref_img.shape[:2]:
-                        ref_mask = cv2.resize(ref_mask, (ref_img.shape[1], ref_img.shape[0]))
-                        print(f"[Debug] Resized ref_mask to: {ref_mask.shape}")
-                    
-                    if tgt_mask is not None and tgt_mask.shape[:2] != tgt_img.shape[:2]:
-                        tgt_mask = cv2.resize(tgt_mask, (tgt_img.shape[1], tgt_img.shape[0]))
-                        print(f"[Debug] Resized tgt_mask to: {tgt_mask.shape}")
-                    
-                    # 调试：打印掩码和图像尺寸信息
-                    print(f"[Debug] ref_img: {ref_img.shape}, tgt_img: {tgt_img.shape}")
-                    print(f"[Debug] ref_mask: {ref_mask.shape if ref_mask is not None else None}")
-                    print(f"[Debug] tgt_mask: {tgt_mask.shape if tgt_mask is not None else None}")
-                    
-                    # 如果参考图和目标图尺寸不同，需要调整目标图和掩码
-                    h_ref, w_ref = ref_img.shape[:2]
-                    h_tgt, w_tgt = tgt_img.shape[:2]
-                    
-                    tgt_img_aligned = tgt_img
-                    tgt_mask_aligned = tgt_mask
-                    
-                    if (h_ref, w_ref) != (h_tgt, w_tgt):
-                        print(f"[Debug] 图像尺寸不一致: ref={w_ref}x{h_ref}, tgt={w_tgt}x{h_tgt}")
-                        print(f"[Debug] 调整目标图尺寸...")
-                        tgt_img_aligned = cv2.resize(tgt_img, (w_ref, h_ref))
-                        if tgt_mask_aligned is not None:
-                            tgt_mask_aligned = cv2.resize(tgt_mask, (w_ref, h_ref), interpolation=cv2.INTER_NEAREST)
-                        print(f"[Debug] 调整后 tgt_img: {tgt_img_aligned.shape}, tgt_mask: {tgt_mask_aligned.shape if tgt_mask_aligned is not None else None}")
-                    
-                    aligned = align_images_with_mask(
-                        ref_img,
-                        tgt_img_aligned,
-                        mask1=ref_mask,
-                        mask2=tgt_mask_aligned,
-                        feature_detector_type=self._feature_detector
-                    )
-                elif align_mode == 'optical_flow':
-                    aligned = align_images_optical_flow(
-                        ref_img, 
-                        tgt_img, 
-                        roi_config1=applied_roi, 
-                        roi_config2=applied_roi,
-                        feature_detector_type=self._feature_detector
-                    )
-                else:
-                    aligned = align_images(
-                        ref_img, 
-                        tgt_img, 
-                        roi_config1=applied_roi, 
-                        roi_config2=applied_roi,
-                        feature_detector_type=self._feature_detector
-                    )
-                
-                if aligned is not None:
+                aligned_map, notes = align_batch_reconstruction_3d(
+                    reference_path,
+                    target_paths,
+                    align3d_params=align3d_params or {},
+                    image_band_map=image_band_map,
+                    batch_id=batch_id,
+                )
+                print(f"[AlignService] 3D reconstruction notes: {notes}")
+                for path, aligned in aligned_map.items():
                     aligned_images_map[path] = aligned
-                    process_paths.append(path)
-                else:
-                    results[path] = (False, "对齐失败：特征匹配不足", None)
+                    if path not in process_paths:
+                        process_paths.append(path)
+                for path in target_paths:
+                    if path not in aligned_map:
+                        results[path] = (False, "3D 对齐失败", None)
             except Exception as e:
-                print(f"[AlignService] Exception aligning {path}: {e}")
-                results[path] = (False, f"对齐异常: {str(e)}", None)
+                print(f"[AlignService] 3D reconstruction failed: {e}")
+                for path in target_paths:
+                    results[path] = (False, f"3D 对齐异常: {str(e)}", None)
+        else:
+            for path in target_paths:
+                if os.path.abspath(path) == os.path.abspath(reference_path):
+                    continue
+                    
+                try:
+                    tgt_img = cv2.imread(path)
+                    if tgt_img is None:
+                        results[path] = (False, f"无法加载目标图: {path}", None)
+                        continue
+                    
+                    if align_mode == 'sam2_object':
+                        # SAM2 物体配准模式
+                        print(f"[AlignService] SAM2 模式：正在分割目标图 {path}...")
+                        try:
+                            if sam2_points:
+                                # 使用相同的点坐标（多光谱图像场景相同）
+                                tgt_masks = sam2_client.segment_image_by_points(path, sam2_points)
+                            else:
+                                tgt_masks = sam2_client.segment_image(path)
+                            tgt_mask = sam2_client.get_largest_mask(tgt_masks, top_n=3)
+                            if tgt_mask is not None:
+                                print(f"[AlignService] 目标图掩码获取成功，覆盖像素: {tgt_mask.sum() // 255}")
+                                print(f"[AlignService] 目标图尺寸: {tgt_img.shape}, 掩码尺寸: {tgt_mask.shape}")
+                        except Exception as e:
+                            print(f"[AlignService] SAM2 分割目标图失败: {e}")
+                            tgt_mask = None
+                        
+                        # 确保掩码尺寸与图像尺寸匹配
+                        if ref_mask is not None and ref_mask.shape[:2] != ref_img.shape[:2]:
+                            ref_mask = cv2.resize(ref_mask, (ref_img.shape[1], ref_img.shape[0]))
+                            print(f"[Debug] Resized ref_mask to: {ref_mask.shape}")
+                        
+                        if tgt_mask is not None and tgt_mask.shape[:2] != tgt_img.shape[:2]:
+                            tgt_mask = cv2.resize(tgt_mask, (tgt_img.shape[1], tgt_img.shape[0]))
+                            print(f"[Debug] Resized tgt_mask to: {tgt_mask.shape}")
+                        
+                        # 调试：打印掩码和图像尺寸信息
+                        print(f"[Debug] ref_img: {ref_img.shape}, tgt_img: {tgt_img.shape}")
+                        print(f"[Debug] ref_mask: {ref_mask.shape if ref_mask is not None else None}")
+                        print(f"[Debug] tgt_mask: {tgt_mask.shape if tgt_mask is not None else None}")
+                        
+                        # 如果参考图和目标图尺寸不同，需要调整目标图和掩码
+                        h_ref, w_ref = ref_img.shape[:2]
+                        h_tgt, w_tgt = tgt_img.shape[:2]
+                        
+                        tgt_img_aligned = tgt_img
+                        tgt_mask_aligned = tgt_mask
+                        
+                        if (h_ref, w_ref) != (h_tgt, w_tgt):
+                            print(f"[Debug] 图像尺寸不一致: ref={w_ref}x{h_ref}, tgt={w_tgt}x{h_tgt}")
+                            print(f"[Debug] 调整目标图尺寸...")
+                            tgt_img_aligned = cv2.resize(tgt_img, (w_ref, h_ref))
+                            if tgt_mask_aligned is not None:
+                                tgt_mask_aligned = cv2.resize(tgt_mask, (w_ref, h_ref), interpolation=cv2.INTER_NEAREST)
+                            print(f"[Debug] 调整后 tgt_img: {tgt_img_aligned.shape}, tgt_mask: {tgt_mask_aligned.shape if tgt_mask_aligned is not None else None}")
+                        
+                        aligned = align_images_with_mask(
+                            ref_img,
+                            tgt_img_aligned,
+                            mask1=ref_mask,
+                            mask2=tgt_mask_aligned,
+                            feature_detector_type=self._feature_detector
+                        )
+                    elif align_mode == 'optical_flow':
+                        aligned = align_images_optical_flow(
+                            ref_img, 
+                            tgt_img, 
+                            roi_config1=applied_roi, 
+                            roi_config2=applied_roi,
+                            feature_detector_type=self._feature_detector
+                        )
+                    else:
+                        aligned = align_images(
+                            ref_img, 
+                            tgt_img, 
+                            roi_config1=applied_roi, 
+                            roi_config2=applied_roi,
+                            feature_detector_type=self._feature_detector
+                        )
+                    
+                    if aligned is not None:
+                        aligned_images_map[path] = aligned
+                        process_paths.append(path)
+                    else:
+                        results[path] = (False, "对齐失败：特征匹配不足", None)
+                except Exception as e:
+                    print(f"[AlignService] Exception aligning {path}: {e}")
+                    results[path] = (False, f"对齐异常: {str(e)}", None)
 
         if len(aligned_images_map) <= 1:
             return results

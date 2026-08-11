@@ -2,7 +2,7 @@
  * 植被指数面板组件
  */
 import { useState, useEffect, useMemo } from 'react';
-import { Card, Select, Button, Row, Col, Statistic, Divider, Tag, message, Modal, Input, Slider, Radio } from 'antd';
+import { Card, Select, Button, Row, Col, Statistic, Divider, Tag, message, Modal, Input, Slider, Radio, InputNumber } from 'antd';
 import { vegetationService } from '../services/api';
 import { batchService } from '../services/api';
 import { API_BASE } from '../services/api';
@@ -37,6 +37,9 @@ const COLORMAP_OPTIONS = [
     { label: 'Gray (灰度)', value: 'Gray' },
 ];
 
+// 可配置辐射补偿系数的波段（一级相对辐射补偿，IMX290C 响应曲线 + FWHM 带宽）
+const CORRECTION_BANDS = ['560', '650', '730', '850'] as const;
+
 export default function VegetationPanel({ images, batches, batchId, onBlendedImageUrlChange, onGeneratedImageAdded, onCompareChange }: Props) {
     const [indices, setIndices] = useState<VegetationIndexInfo[]>([]);
     const [selectedIndex, setSelectedIndex] = useState<string>('NDVI');
@@ -50,6 +53,10 @@ export default function VegetationPanel({ images, batches, batchId, onBlendedIma
         filepath: string; width: number; height: number; channels: number; fileSize: number;
         indexName: string;
     } | null>(null);
+
+    // 波段辐射补偿系数（一级相对辐射补偿，在此配置并保存到后端，后续指数计算生效）
+    const [corrections, setCorrections] = useState<Record<string, number>>({});
+    const [savingCorrections, setSavingCorrections] = useState(false);
 
     const getEffectiveBatchId = (): string | undefined => {
         if (batchId) return batchId;
@@ -97,6 +104,11 @@ export default function VegetationPanel({ images, batches, batchId, onBlendedIma
 
     useEffect(() => {
         loadIndices();
+        vegetationService.getBandCorrection()
+            .then(setCorrections)
+            .catch(() => {
+                // 读取失败时保持空值，不影响指数计算功能
+            });
     }, []);
 
     // 自动匹配波段
@@ -110,15 +122,15 @@ export default function VegetationPanel({ images, batches, batchId, onBlendedIma
         current.required_bands.forEach(band => {
             // 如果该波段尚未选择图像，尝试自动匹配
             if (!newMapping[band]?.imageId) {
-                let keyword = '';
-                // G->570nm，R->650nm，RE->730nm，NIR->850nm
-                if (band === 'NIR') keyword = '850';
-                else if (band === 'RED') keyword = '650';
-                else if (band === 'GREEN') keyword = '570';
-                else if (band === 'RED_EDGE') keyword = '730';
+                let keywords: string[] = [];
+                // G->560nm（兼容旧数据文件名中的 570 标注），R->650nm，RE->730nm，NIR->850nm
+                if (band === 'NIR') keywords = ['850'];
+                else if (band === 'RED') keywords = ['650'];
+                else if (band === 'GREEN') keywords = ['560', '570'];
+                else if (band === 'RED_EDGE') keywords = ['730'];
 
-                if (keyword) {
-                    const match = images.find(img => img.filename.includes(keyword));
+                if (keywords.length > 0) {
+                    const match = images.find(img => keywords.some(k => img.filename.includes(k)));
                     if (match) {
                         newMapping[band] = { imageId: match.id, channel: 'r' };
                         hasChanges = true;
@@ -176,6 +188,19 @@ export default function VegetationPanel({ images, batches, batchId, onBlendedIma
             ...prev,
             [bandType]: { imageId, channel }
         }));
+    };
+
+    const handleSaveCorrections = async () => {
+        setSavingCorrections(true);
+        try {
+            const saved = await vegetationService.updateBandCorrection(corrections);
+            setCorrections(saved);
+            message.success('补偿系数已保存，后续指数计算生效');
+        } catch (e: any) {
+            message.error(e?.response?.data?.detail || '保存补偿系数失败');
+        } finally {
+            setSavingCorrections(false);
+        }
     };
 
     const handleCalculate = async () => {
@@ -330,6 +355,38 @@ export default function VegetationPanel({ images, batches, batchId, onBlendedIma
                         </Row>
                     </div>
                 ))}
+            </div>
+
+            <Divider>辐射补偿系数</Divider>
+
+            <div className="correction-section">
+                <Row gutter={[8, 8]}>
+                    {CORRECTION_BANDS.map(wl => (
+                        <Col span={12} key={wl}>
+                            <div className="correction-item">
+                                <span className="correction-label">{wl}nm</span>
+                                <InputNumber
+                                    size="small"
+                                    style={{ flex: 1 }}
+                                    min={0.0001}
+                                    max={100}
+                                    step={0.0001}
+                                    value={corrections[wl]}
+                                    onChange={(v) => setCorrections(prev => ({ ...prev, [wl]: v ?? 1 }))}
+                                />
+                            </div>
+                        </Col>
+                    ))}
+                </Row>
+                <Button
+                    block
+                    size="small"
+                    style={{ marginTop: 8 }}
+                    loading={savingCorrections}
+                    onClick={handleSaveCorrections}
+                >
+                    保存补偿系数
+                </Button>
             </div>
 
             <div className="colormap-selector">

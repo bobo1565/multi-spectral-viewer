@@ -42,6 +42,14 @@ class CameraStream:
         self.capture_thread: Optional[threading.Thread] = None
         self.is_main = False
 
+        # 保活时间戳：记录该流最后一次“被需要”的时间。
+        # StreamManager 的后台清理线程据此决定是否停掉闲置流。
+        self.last_needed_time: float = time.time()
+
+    def touch(self):
+        """刷新保活时间戳，表示该流仍被前端需要，清理线程不应停掉它。"""
+        self.last_needed_time = time.time()
+
     def start(self) -> bool:
         """启动视频流"""
         if self.is_running:
@@ -72,6 +80,7 @@ class CameraStream:
                 with self.frame_lock:
                     if self.frame is not None and self.frame.mean() >= self.BLACK_FRAME_MEAN_THRESHOLD:
                         self.is_connected = True
+                        self.touch()
                         print(f"[Stream {self.camera_id}] 连接成功")
                         return True
                 time.sleep(0.1)
@@ -139,6 +148,9 @@ class CameraStream:
                     continue
 
                 consecutive_black = 0
+                # 收到有效帧即视为已连接：start() 的首帧等待超时后、以及 _reconnect()
+                # 重连成功后，都靠这里把状态恢复为在线
+                self.is_connected = True
 
                 with self.frame_lock:
                     self.frame = frame
@@ -232,11 +244,51 @@ class CameraStream:
 class StreamManager:
     """管理多个摄像头的视频流"""
 
+    # 保活阈值：流在最后一次被需要后，保留这么久才停掉。
+    # 让用户在切换页面/短暂离开后回来时能瞬间复用，无需重新 RTSP 握手。
+    STREAM_KEEPALIVE_SEC = 60
+    # 清理线程扫描间隔
+    _CLEANUP_INTERVAL_SEC = 10
+
     def __init__(self, config: Dict):
         self.config = config
         self.streams: Dict[str, CameraStream] = {}
         self.starting: Dict[str, str] = {}
         self.lock = threading.Lock()
+        self._stop_cleanup = threading.Event()
+        # 启动后台保活清理线程
+        self._cleanup_thread = threading.Thread(target=self._cleanup_loop, daemon=True)
+        self._cleanup_thread.start()
+
+    def _cleanup_loop(self):
+        """后台定期停掉超过保活阈值未被需要的流。"""
+        while not self._stop_cleanup.wait(self._CLEANUP_INTERVAL_SEC):
+            try:
+                now = time.time()
+                to_stop: list = []
+                with self.lock:
+                    for cid, stream in self.streams.items():
+                        idle = now - stream.last_needed_time
+                        if idle > self.STREAM_KEEPALIVE_SEC:
+                            to_stop.append((cid, idle))
+                for cid, idle in to_stop:
+                    print(f"[Stream] 保活清理: 停止闲置 {idle:.0f}s 的流: {cid}")
+                    # remove_camera 会从 self.streams 移除并 stop
+                    self.remove_camera(cid)
+            except Exception as e:
+                print(f"[Stream] 保活清理线程异常: {e}")
+
+    def touch_active(self, active_ids):
+        """刷新给定摄像头列表的保活时间戳。
+
+        在 streams_status 被调用时使用：前端正在看的流刷新时间戳，
+        未被列出的流不动其时间戳，交由清理线程按阈值停掉。
+        """
+        with self.lock:
+            for cid in active_ids:
+                stream = self.streams.get(cid)
+                if stream is not None:
+                    stream.touch()
 
     def add_camera(self, camera_id: str, rtsp_url: str) -> bool:
         """添加摄像头"""
@@ -288,6 +340,23 @@ class StreamManager:
         threading.Thread(target=_start, daemon=True).start()
         return True
 
+    def restart_camera(self, camera_id: str, rtsp_url: str) -> bool:
+        """同步重启单个摄像头流：停掉旧流并立即重建。
+
+        重启期间通过 starting 标记抑制 ensure_camera_async 的重复启动，
+        避免状态轮询在“旧流已停、新流未建好”的窗口内对同一摄像头
+        再开一条并发 RTSP 连接（两条会话互相争抢会显著拖慢握手）。
+        """
+        with self.lock:
+            self.starting[camera_id] = rtsp_url
+        try:
+            self.remove_camera(camera_id)
+            return self.add_camera(camera_id, rtsp_url)
+        finally:
+            with self.lock:
+                if self.starting.get(camera_id) == rtsp_url:
+                    del self.starting[camera_id]
+
     def remove_camera(self, camera_id: str):
         """移除摄像头"""
         stream: Optional[CameraStream] = None
@@ -316,6 +385,7 @@ class StreamManager:
 
     def stop_all(self):
         """停止所有流"""
+        self._stop_cleanup.set()
         with self.lock:
             streams = list(self.streams.values())
             self.streams.clear()

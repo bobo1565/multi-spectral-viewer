@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import time
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -253,23 +254,51 @@ async def refresh_streams(
     db: Session = Depends(get_db),
     service: CameraService = Depends(get_camera_service),
 ):
-    """刷新指定摄像头的视频流：停止并重新连接 RTSP，确保流状态干净"""
+    """刷新指定摄像头的视频流。
+
+    - 已连接且帧新鲜的流保持不动：前端重建 MJPEG 连接即可瞬间恢复画面，
+      不必要的 RTSP 重握手（每台约 4-5s，最慢可达 30s）是刷新慢的主因
+    - 只有离线/异常/未运行的流才会重启，且多台并行：总耗时 ≈ 最慢的一台
+    """
     all_cams = CameraDBService.list_cameras(db)
     cam_map = {c.id: c for c in all_cams}
 
-    refreshed = 0
+    targets = []
     for cam_id in (payload.active_ids or []):
         cam = cam_map.get(cam_id)
-        if not cam or not cam.stream_url:
-            continue
-        # 先停掉旧流（会触发 MJPEG 生成器退出，浏览器旧连接关闭）
-        await run_in_threadpool(service.stream_manager.remove_camera, cam_id)
-        # 立即重建新流（接下来的 MJPEG 请求会拿到全新 RTSP 连接）
-        if await run_in_threadpool(service.stream_manager.add_camera, cam_id, cam.stream_url):
-            refreshed += 1
-            print(f"[Stream] 刷新视频流: {cam_id} ({cam.name})")
+        if cam and cam.stream_url:
+            targets.append((cam_id, cam.name, cam.stream_url))
 
-    return {"success": True, "refreshed": refreshed}
+    def _is_healthy(cam_id: str) -> bool:
+        stream = service.stream_manager.get_stream(cam_id)
+        if stream is None:
+            return False
+        st = stream.get_status()
+        # is_connected 内部已含 frame_age < 5s 的新鲜度判断
+        return bool(st.get("is_running")) and bool(st.get("is_connected"))
+
+    restart_targets = [t for t in targets if not _is_healthy(t[0])]
+    skipped = len(targets) - len(restart_targets)
+    if skipped:
+        print(f"[Stream] 刷新视频流: {skipped} 台连接正常，跳过重启")
+
+    def _restart(target) -> bool:
+        cam_id, _name, stream_url = target
+        # 停旧流（触发 MJPEG 生成器退出，浏览器旧连接关闭）并立即重建新流；
+        # restart_camera 期间会抑制状态轮询触发的重复启动
+        return service.stream_manager.restart_camera(cam_id, stream_url)
+
+    def _restart_all() -> int:
+        with ThreadPoolExecutor(max_workers=len(restart_targets)) as pool:
+            results = list(pool.map(_restart, restart_targets))
+        for (cam_id, name, _), ok in zip(restart_targets, results):
+            if ok:
+                print(f"[Stream] 重启视频流: {cam_id} ({name})")
+        return sum(1 for ok in results if ok)
+
+    restarted = await run_in_threadpool(_restart_all) if restart_targets else 0
+
+    return {"success": True, "refreshed": skipped + restarted, "restarted": restarted, "skipped": skipped}
 
 
 @router.get("/{cam_id}/stream")
@@ -355,11 +384,10 @@ async def streams_status(
     all_cams = CameraDBService.list_cameras(db)
     cam_map = {c.id: c for c in all_cams}
 
-    # 停掉不在窗口中的流
-    for cid in list(service.stream_manager.get_all_streams().keys()):
-        if cid not in active_ids:
-            await run_in_threadpool(service.stream_manager.remove_camera, cid)
-            print(f"[Stream] 停止闲置视频流以降低延迟: {cid}")
+    # 保活：刷新前端正在查看的流的 last_needed_time。
+    # 不再立即停掉未被列出的流——交由后台清理线程按 60s 阈值处理，
+    # 这样用户切换页面后短时间内回来能瞬间复用流，无需重新 RTSP 握手。
+    service.stream_manager.touch_active(active_ids)
 
     # 启动需要的流
     for cid in active_ids:

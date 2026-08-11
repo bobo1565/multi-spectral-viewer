@@ -35,7 +35,7 @@ DEFAULT_CAMERA_SEEDS = [
         "username": "admin",
         "password": "admin",
         "camera_type": "ONVIF",
-        "band_type": "570nm",
+        "band_type": "560nm",
     },
     {
         "name": "ONVIF_Camera_114",

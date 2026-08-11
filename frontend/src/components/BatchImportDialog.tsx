@@ -37,7 +37,7 @@ interface BatchImportDialogProps {
 
 interface FileState {
     rgb: UploadFile | null;
-    '570nm': UploadFile | null;
+    '560nm': UploadFile | null;
     '650nm': UploadFile | null;
     '730nm': UploadFile | null;
     '850nm': UploadFile | null;
@@ -45,7 +45,7 @@ interface FileState {
 
 const initialFileState: FileState = {
     rgb: null,
-    '570nm': null,
+    '560nm': null,
     '650nm': null,
     '730nm': null,
     '850nm': null,

@@ -168,12 +168,12 @@ async def delete_batch_images_by_type(batch_id: str, image_type: str, db: Sessio
 async def import_batch_images(
     batch_id: str,
     rgb: Optional[UploadFile] = File(None),
-    band_570nm: Optional[UploadFile] = File(None),
+    band_560nm: Optional[UploadFile] = File(None),
     band_650nm: Optional[UploadFile] = File(None),
     band_730nm: Optional[UploadFile] = File(None),
     band_850nm: Optional[UploadFile] = File(None),
     raw_params_rgb: Optional[str] = Form(None),
-    raw_params_570nm: Optional[str] = Form(None),
+    raw_params_560nm: Optional[str] = Form(None),
     raw_params_650nm: Optional[str] = Form(None),
     raw_params_730nm: Optional[str] = Form(None),
     raw_params_850nm: Optional[str] = Form(None),
@@ -189,7 +189,7 @@ async def import_batch_images(
     # 映射文件到波段
     files_map = {
         "rgb": rgb,
-        "570nm": band_570nm,
+        "560nm": band_560nm,
         "650nm": band_650nm,
         "730nm": band_730nm,
         "850nm": band_850nm
@@ -198,7 +198,7 @@ async def import_batch_images(
     # RAW 参数映射
     raw_params_map = {
         "rgb": raw_params_rgb,
-        "570nm": raw_params_570nm,
+        "560nm": raw_params_560nm,
         "650nm": raw_params_650nm,
         "730nm": raw_params_730nm,
         "850nm": raw_params_850nm,
