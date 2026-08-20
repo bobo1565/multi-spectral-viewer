@@ -55,7 +55,7 @@ app.add_middleware(CacheControlMiddleware)
 
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
-from app.api.routes import images, processing, blending, vegetation, alignment, align3d, batches, cameras, capture
+from app.api.routes import images, processing, blending, vegetation, alignment, align3d, batches, cameras, capture, imaging
 from app.database import engine, Base, SessionLocal
 from app.services.image_db_service import ImageDBService
 from app.storage.file_manager import file_manager
@@ -70,6 +70,7 @@ app.include_router(alignment.router, prefix="/api/alignment", tags=["alignment"]
 app.include_router(align3d.router, prefix="/api/align3d", tags=["align3d"])
 app.include_router(batches.router, prefix="/api/batches", tags=["batches"])
 app.include_router(cameras.router, prefix="/api/cameras", tags=["cameras"])
+app.include_router(imaging.router, prefix="/api/cameras", tags=["imaging"])
 app.include_router(capture.router, prefix="/api/capture", tags=["capture"])
 
 

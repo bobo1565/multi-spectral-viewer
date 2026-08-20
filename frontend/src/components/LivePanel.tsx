@@ -5,11 +5,12 @@
  */
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { Button, Checkbox, Input, Select, Space, Tag, message, Modal, Tooltip } from 'antd';
-import { CameraOutlined, ExpandOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons';
+import { CameraOutlined, ExpandOutlined, ReloadOutlined, SettingOutlined, SlidersOutlined } from '@ant-design/icons';
 
 import { cameraApi, captureApi } from '../services/cameraApi';
 import type { CameraInfo, BandType, StreamStatus } from '../types';
 import { BAND_TYPES, BAND_LABELS } from '../types';
+import ImagingPanel from './ImagingPanel';
 import './LivePanel.css';
 
 interface LivePanelProps {
@@ -39,6 +40,9 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
     const [pollTick, setPollTick] = useState(0);
     const [isStreamRenderingEnabled, setIsStreamRenderingEnabled] = useState(isDocumentVisible);
     const [maximizedCameraId, setMaximizedCameraId] = useState<string | null>(null);
+    // ONVIF 成像参数面板：open 状态 + 目标摄像头
+    const [imagingOpen, setImagingOpen] = useState(false);
+    const [imagingCameraId, setImagingCameraId] = useState<string | null>(null);
 
     // 所有窗口（无论大图/小图）共用同一码率/URL，确保切换大图时浏览器无需
     // 重新建立 MJPEG 连接，避免出现新主画面或新小图黑屏的问题
@@ -319,6 +323,12 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
         setMainId("");
     };
 
+    // 打开某台摄像头的成像参数面板；不传 id 时用当前主画面摄像头
+    const openImagingPanel = useCallback((cam_id?: string) => {
+        setImagingCameraId(cam_id || mainId || null);
+        setImagingOpen(true);
+    }, [mainId]);
+
     const tileItems = useMemo<LiveTileItem[]>(() => {
         const usedIds = new Set<string>();
         const ordered: LiveTileItem[] = [];
@@ -452,6 +462,14 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
                                 />
                             </Tooltip>
                         )}
+                        <Tooltip title="成像参数">
+                            <Button
+                                size="small"
+                                className="tile-maximize-btn"
+                                icon={<SlidersOutlined />}
+                                onClick={() => openImagingPanel(cam.id)}
+                            />
+                        </Tooltip>
                     </div>
                 </div>
 
@@ -515,6 +533,7 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
                     >
                         抓拍全部
                     </Button>
+                    <Button icon={<SlidersOutlined />} onClick={() => openImagingPanel()}>曝光参数</Button>
                     <Button icon={<ReloadOutlined />} loading={refreshing} onClick={handleRefreshStreams}>刷新流</Button>
                     <Button icon={<SettingOutlined />} onClick={onGoCameraManager}>摄像头管理</Button>
                 </div>
@@ -577,6 +596,12 @@ const LivePanel: React.FC<LivePanelProps> = ({ onCaptureSuccess, onGoCameraManag
                     </div>
                 )}
             </Modal>
+
+            <ImagingPanel
+                open={imagingOpen}
+                cameraId={imagingCameraId}
+                onClose={() => setImagingOpen(false)}
+            />
         </div>
     );
 };

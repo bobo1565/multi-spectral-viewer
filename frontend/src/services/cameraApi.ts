@@ -10,6 +10,10 @@ import type {
     CaptureBatchRequest,
     CaptureBatchResponse,
     BandType,
+    ImagingState,
+    ImagingSettings,
+    ImagingActionResult,
+    BandImagingProfile,
 } from '../types';
 
 const API_BASE = import.meta.env.DEV ? 'http://localhost:8002' : '';
@@ -96,6 +100,40 @@ export const cameraApi = {
             active_ids,
             main_id: '',
         });
+        return res.data;
+    },
+};
+
+/** ONVIF Imaging 参数控制（曝光/增益/白平衡等） */
+export const imagingApi = {
+    async get(cam_id: string): Promise<ImagingState> {
+        const res = await api.get(`/api/cameras/${cam_id}/imaging`);
+        return res.data;
+    },
+
+    async update(cam_id: string, settings: Partial<ImagingSettings>): Promise<ImagingState> {
+        const res = await api.put(`/api/cameras/${cam_id}/imaging`, { settings });
+        return res.data;
+    },
+
+    async bandProfiles(): Promise<Record<string, BandImagingProfile>> {
+        const res = await api.get('/api/cameras/imaging/band-profiles');
+        return res.data.profiles;
+    },
+
+    async saveBandProfiles(profiles: Record<string, BandImagingProfile>): Promise<void> {
+        await api.put('/api/cameras/imaging/band-profiles', { profiles });
+    },
+
+    /** 一键多光谱模式：按波段策略表固定曝光/Gain，关自动白平衡与 WDR */
+    async multispectralMode(): Promise<ImagingActionResult[]> {
+        const res = await api.post('/api/cameras/imaging/multispectral-mode');
+        return res.data;
+    },
+
+    /** 把同一组参数应用到多台（默认全部监控中）摄像头 */
+    async applyAll(settings: Partial<ImagingSettings>, camera_ids?: string[]): Promise<ImagingActionResult[]> {
+        const res = await api.post('/api/cameras/imaging/apply-all', { settings, camera_ids });
         return res.data;
     },
 };

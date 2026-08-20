@@ -18,10 +18,18 @@ class CameraStream:
     # 黑帧判定阈值：帧均值低于此值视为黑帧
     BLACK_FRAME_MEAN_THRESHOLD = 5
 
-    def __init__(self, camera_id: str, rtsp_url: str, config: Dict):
+    def __init__(self, camera_id: str, rtsp_url: str, config: Dict,
+                 black_threshold: Optional[float] = None):
         self.camera_id = camera_id
         self.rtsp_url = rtsp_url
         self.config = config
+        # 实例级黑帧阈值：默认用类常量；当用户通过参数面板把曝光压到很短、
+        # 画面本征变暗（均值 2~3）时，由 StreamManager 放宽阈值让真实暗帧通过，
+        # 否则用户会看到冻结的旧帧，误以为曝光设置没生效
+        self.black_frame_threshold = (
+            black_threshold if black_threshold is not None
+            else self.BLACK_FRAME_MEAN_THRESHOLD
+        )
 
         self.cap: Optional[cv2.VideoCapture] = None
         self.cap_lock = threading.Lock()
@@ -78,7 +86,7 @@ class CameraStream:
             wait_start = time.time()
             while time.time() - wait_start < 8:
                 with self.frame_lock:
-                    if self.frame is not None and self.frame.mean() >= self.BLACK_FRAME_MEAN_THRESHOLD:
+                    if self.frame is not None and self.frame.mean() >= self.black_frame_threshold:
                         self.is_connected = True
                         self.touch()
                         print(f"[Stream {self.camera_id}] 连接成功")
@@ -134,7 +142,7 @@ class CameraStream:
                 self.error_count = 0
 
                 # 检测黑帧：H.264 解码器在未收到关键帧时会产生全黑帧
-                if frame.mean() < self.BLACK_FRAME_MEAN_THRESHOLD:
+                if frame.mean() < self.black_frame_threshold:
                     consecutive_black += 1
                     self.black_frame_count += 1
                     if consecutive_black == 1:
@@ -254,6 +262,8 @@ class StreamManager:
         self.config = config
         self.streams: Dict[str, CameraStream] = {}
         self.starting: Dict[str, str] = {}
+        # 每台摄像头的黑帧阈值覆盖（用户手动压低曝光后放宽判定，让真实暗帧通过）
+        self.threshold_overrides: Dict[str, float] = {}
         self.lock = threading.Lock()
         self._stop_cleanup = threading.Event()
         # 启动后台保活清理线程
@@ -305,7 +315,10 @@ class StreamManager:
         if old_stream:
             old_stream.stop()
 
-        stream = CameraStream(camera_id, rtsp_url, self.config.get('streaming', {}))
+        stream = CameraStream(
+            camera_id, rtsp_url, self.config.get('streaming', {}),
+            black_threshold=self.threshold_overrides.get(camera_id),
+        )
         if not stream.start():
             return False
 
@@ -367,6 +380,27 @@ class StreamManager:
 
         if stream:
             stream.stop()
+
+    def set_black_frame_threshold(self, camera_id: str, threshold: Optional[float]):
+        """调整某台摄像头的黑帧判定阈值（None 恢复默认）。
+
+        用户手动设置短曝光后画面本征变暗（均值 2~3），默认阈值 5 会把
+        真实暗帧误判为黑帧，导致监控画面冻结在旧帧、看起来像设置没生效。
+        放宽到 ~1.0 后真实暗帧通过，而解码器失步产生的纯黑帧（均值≈0）
+        仍会被过滤并触发重连。
+        """
+        with self.lock:
+            if threshold is None:
+                self.threshold_overrides.pop(camera_id, None)
+            else:
+                self.threshold_overrides[camera_id] = threshold
+            stream = self.streams.get(camera_id)
+
+        if stream is not None:
+            stream.black_frame_threshold = (
+                threshold if threshold is not None
+                else CameraStream.BLACK_FRAME_MEAN_THRESHOLD
+            )
 
     def get_stream(self, camera_id: str) -> Optional[CameraStream]:
         """获取视频流"""

@@ -1,0 +1,22 @@
+{
+  "rgb": {
+    "exposure_time_us": 10000,
+    "gain": 0
+  },
+  "560nm": {
+    "exposure_time_us": 10000,
+    "gain": 0
+  },
+  "650nm": {
+    "exposure_time_us": 10000,
+    "gain": 0
+  },
+  "730nm": {
+    "exposure_time_us": 12000,
+    "gain": 0
+  },
+  "850nm": {
+    "exposure_time_us": 15000,
+    "gain": 0
+  }
+}

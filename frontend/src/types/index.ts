@@ -190,3 +190,65 @@ export interface CaptureBatchResponse {
     failed: number;
 }
 
+// ---------- ONVIF Imaging 参数控制 ----------
+
+/** 归一化后的摄像头 Imaging 参数（键是否存在取决于相机能力） */
+export interface ImagingSettings {
+    exposure_mode?: 'AUTO' | 'MANUAL' | string;
+    exposure_time_us?: number;
+    min_exposure_time_us?: number;
+    max_exposure_time_us?: number;
+    gain?: number;
+    brightness?: number;
+    contrast?: number;
+    saturation?: number;
+    sharpness?: number;
+    wb_mode?: 'AUTO' | 'MANUAL' | string;
+    wb_r_gain?: number;
+    wb_b_gain?: number;
+    wdr_mode?: 'ON' | 'OFF' | string;
+    wdr_level?: number;
+    ir_cut?: 'ON' | 'OFF' | 'AUTO' | string;
+    blc_mode?: 'ON' | 'OFF' | string;
+    blc_level?: number;
+}
+
+export interface ImagingRange {
+    min: number;
+    max: number;
+}
+
+/** GetOptions 归一化结果：数值参数给 min/max，枚举参数给可选值列表 */
+export type ImagingOptions = Record<string, ImagingRange | string[]>;
+
+export interface ImagingState {
+    supported: boolean;
+    settings: ImagingSettings;
+    options: ImagingOptions;
+    message: string;
+    /** 设置后回读校验未生效的字段（软拒绝） */
+    rejected?: ImagingRejectedField[];
+}
+
+export interface ImagingRejectedField {
+    field: string;
+    label: string;
+    requested: number | string;
+    actual: number | string | null;
+}
+
+/** 波段曝光策略：auto_exposure=true 表示该波段保持自动曝光 */
+export interface BandImagingProfile {
+    auto_exposure?: boolean;
+    exposure_time_us?: number;
+    gain?: number;
+}
+
+export interface ImagingActionResult {
+    camera_id: string;
+    name: string;
+    band_type?: string | null;
+    success: boolean;
+    message: string;
+}
+

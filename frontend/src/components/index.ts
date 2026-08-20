@@ -8,3 +8,4 @@ export { default as AlignmentPanel } from './AlignmentPanel';
 export { BatchImportDialog } from './BatchImportDialog';
 export { default as LivePanel } from './LivePanel';
 export { default as CameraManager } from './CameraManager';
+export { default as ImagingPanel } from './ImagingPanel';
